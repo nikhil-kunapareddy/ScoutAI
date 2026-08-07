@@ -1,0 +1,104 @@
+# ─── Secrets & credentials ────────────────────────────────────────────────
+# Slack tokens (SLACK_BOT_TOKEN / SLACK_APP_TOKEN), LLAMA_API_KEY, etc.
+# .env.example is the tracked, value-free template.
+.env
+.env.*
+!.env.example
+*.env
+secrets.*
+credentials.*
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+.netrc
+.npmrc
+.pypirc
+*token*.json
+*credential*.json
+
+# ─── Personal data (resumes, cover letters, scraped job results) ──────────
+# Keep the folder in the tree, ignore everything inside it.
+data/*
+!data/.gitkeep
+resume*.pdf
+resume*.docx
+cover_letter*
+*.resume
+downloads/
+exports/
+
+# ─── Runtime logs & state ─────────────────────────────────────────────────
+logs/*
+!logs/.gitkeep
+*.log
+*.log.*
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+.cache/
+cache/
+tmp/
+.tmp/
+
+# ─── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Test & type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# Notebooks
+.ipynb_checkpoints/
+
+# ─── Editors & IDEs ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# ─── OS cruft ─────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
