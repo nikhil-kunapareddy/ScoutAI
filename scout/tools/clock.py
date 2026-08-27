@@ -1,4 +1,4 @@
-"""Current time and date tools."""
+"""Current date and time, in the host's local timezone."""
 
 from __future__ import annotations
 

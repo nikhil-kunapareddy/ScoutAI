@@ -1,0 +1,21 @@
+# Secrets never go in the image — the platform injects them as env vars.
+.env
+.env.*
+
+# Not needed at runtime.
+.git/
+.gitignore
+.venv/
+venv/
+tests/
+logs/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+requirements-dev.txt
+README.md
+Dockerfile
+.dockerignore
+.DS_Store

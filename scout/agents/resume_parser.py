@@ -1,16 +1,15 @@
-"""
-Resume Parser Agent: reads the user's resume and produces a structured
-``CandidateProfile`` that the job-search agent (see ``bigtech.py``) consumes.
+"""Resume Parser Agent: turns the user's resume into a structured profile.
 
-This is the *producer* half of a two-step pipeline:
+The producer half of a two-step pipeline, wired up in ``resume_tailored.py``:
 
-    resume_parser  ──CandidateProfile──▶  bigtech (job search)
+    resume_parser  ──CandidateProfile──▶  job agent (bigtech, university, …)
 
-It defines no new tools — it reuses the existing ``resume`` tool
-(``get_resume_profile``) to read the file, then the model distills that raw
-text into the fields below. ``parse_profile`` turns the agent's JSON reply into
-a ``CandidateProfile``; ``to_search_brief`` renders it as the hand-off message
-fed to the job agent.
+It defines no tools of its own — it reuses ``get_resume_profile`` to read the
+file, and the model distils that text into the fields below. ``parse_profile``
+turns the reply into a ``CandidateProfile``; ``to_search_brief`` renders it as
+the hand-off message.
+
+Run it alone to check the parsing step: ``AGENT=resume python run.py``.
 """
 
 from __future__ import annotations
@@ -21,25 +20,25 @@ from dataclasses import dataclass, field
 from ..core.agent import AgentSpec
 from ..tools import resume
 
-# --- The structured profile handed off to the job agent -------------------
+# --- The profile handed off to the job agent -------------------------------
 
 
 @dataclass
 class CandidateProfile:
-    """Distilled, reusable summary of the user's resume.
+    """Distilled summary of the user's resume.
 
-    ``keywords`` is the important field for the hand-off: those phrases feed the
-    ``keywords=`` argument of the job-search tools (``search_google_jobs`` etc.).
+    ``keywords`` is the field that matters most for the hand-off: those phrases
+    feed the ``keywords=`` argument of the job-search tools.
     """
 
-    titles: list[str] = field(default_factory=list)      # target roles, e.g. "ML Engineer"
-    skills: list[str] = field(default_factory=list)      # notable skills / technologies
-    keywords: list[str] = field(default_factory=list)    # search phrases for the job tools
-    seniority: str = ""                                  # e.g. "entry" / "mid" / "senior"
-    summary: str = ""                                    # one-line background summary
+    titles: list[str] = field(default_factory=list)    # target roles, e.g. "ML Engineer"
+    skills: list[str] = field(default_factory=list)    # notable skills / technologies
+    keywords: list[str] = field(default_factory=list)  # search phrases for the job tools
+    seniority: str = ""                                # "entry" / "mid" / "senior"
+    summary: str = ""                                  # one-line background
 
     def to_search_brief(self) -> str:
-        """Render the profile as the message handed off to the job agent."""
+        """Render the profile as the message handed to the job agent."""
         parts = ["Candidate profile (use this to tailor and search for roles):"]
         if self.summary:
             parts.append(f"- Background: {self.summary}")
@@ -56,35 +55,35 @@ class CandidateProfile:
 
 # --- Turning the agent's reply into a profile -----------------------------
 
-_LIST_FIELDS = ("titles", "skills", "keywords")
-
 
 def parse_profile(raw: str) -> CandidateProfile:
-    """Parse the resume agent's reply (expected to be JSON) into a profile.
+    """Parse the parser agent's reply (expected to be JSON) into a profile.
 
-    Tolerant on purpose: small local models often wrap JSON in ```code fences```
-    or add a sentence around it, so we extract the outermost ``{...}`` and coerce
-    types. On total failure we return an empty profile rather than raising, so
-    the pipeline degrades to an untailored search instead of erroring out.
+    Tolerant on purpose: small local models wrap JSON in code fences or add a
+    sentence around it, so we take the outermost ``{...}`` and coerce types. Total
+    failure returns an empty profile, degrading to an untailored search rather
+    than erroring out.
     """
     data = _extract_json_object(raw)
     if data is None:
         return CandidateProfile()
 
-    def as_list(v) -> list[str]:
-        if isinstance(v, list):
-            return [str(x).strip() for x in v if str(x).strip()]
-        if isinstance(v, str) and v.strip():
-            return [s.strip() for s in v.split(",") if s.strip()]
-        return []
-
     return CandidateProfile(
-        titles=as_list(data.get("titles")),
-        skills=as_list(data.get("skills")),
-        keywords=as_list(data.get("keywords")),
+        titles=_as_list(data.get("titles")),
+        skills=_as_list(data.get("skills")),
+        keywords=_as_list(data.get("keywords")),
         seniority=str(data.get("seniority") or "").strip(),
         summary=str(data.get("summary") or "").strip(),
     )
+
+
+def _as_list(value: object) -> list[str]:
+    """Coerce a field to a list of strings, accepting "a, b" for ["a", "b"]."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return []
 
 
 def _extract_json_object(raw: str) -> dict | None:
@@ -93,10 +92,10 @@ def _extract_json_object(raw: str) -> dict | None:
     if start == -1 or end <= start:
         return None
     try:
-        obj = json.loads(raw[start : end + 1])
-        return obj if isinstance(obj, dict) else None
+        parsed = json.loads(raw[start:end + 1])
     except json.JSONDecodeError:
         return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 # --- The agent spec -------------------------------------------------------
@@ -119,6 +118,5 @@ SPEC = AgentSpec(
     key="resume",
     name="Resume Parser",
     system_prompt=SYSTEM_PROMPT,
-    tool_modules=[resume],          # reuses the existing get_resume_profile tool
-    default_backend="ollama",
-)
+    tool_modules=[resume],
+)  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)
