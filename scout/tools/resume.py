@@ -1,9 +1,4 @@
-"""
-Resume reading tool.
-
-Reads the user's resume from the data/ folder so the model can reason about
-their skills and background (e.g. before searching for jobs).
-"""
+"""Reads the user's resume from ``data/`` so the model can reason about it."""
 
 from __future__ import annotations
 
@@ -15,18 +10,7 @@ from pypdf import PdfReader
 from ..core.paths import DATA_DIR
 from .registry import ToolRegistry
 
-RESUME_EXTS = {".pdf", ".docx", ".txt", ".md"}
-
-
-def _extract_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    if suffix == ".docx":
-        return docx2txt.process(str(path)) or ""
-    # .txt / .md and other plain text
-    return path.read_text(encoding="utf-8", errors="ignore")
+RESUME_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 
 def register(reg: ToolRegistry) -> None:
@@ -40,22 +24,30 @@ def register(reg: ToolRegistry) -> None:
         if not DATA_DIR.is_dir():
             return "No data/ folder found. Add your resume there (PDF, DOCX, TXT, or MD)."
 
-        candidates = [
-            p for p in DATA_DIR.iterdir()
-            if p.is_file() and p.suffix.lower() in RESUME_EXTS
+        resumes = [
+            path for path in DATA_DIR.iterdir()
+            if path.is_file() and path.suffix.lower() in RESUME_EXTENSIONS
         ]
-        if not candidates:
-            return (
-                "No resume found in data/. Add a resume file "
-                "(PDF, DOCX, TXT, or MD) to that folder."
-            )
+        if not resumes:
+            return ("No resume found in data/. Add a resume file "
+                    "(PDF, DOCX, TXT, or MD) to that folder.")
 
-        resume = max(candidates, key=lambda p: p.stat().st_mtime)
+        newest = max(resumes, key=lambda p: p.stat().st_mtime)
         try:
-            text = _extract_text(resume).strip()
+            text = _extract_text(newest).strip()
         except Exception as e:
-            return f"Could not read resume '{resume.name}': {e}"
+            return f"Could not read resume '{newest.name}': {e}"
 
         if not text:
-            return f"Resume '{resume.name}' appears to be empty or unreadable (scanned image?)."
-        return f"Resume file: {resume.name}\n\n{text}"
+            return f"Resume '{newest.name}' appears to be empty or unreadable (scanned image?)."
+        return f"Resume file: {newest.name}\n\n{text}"
+
+
+def _extract_text(path: Path) -> str:
+    """Pull plain text out of a resume file, by extension."""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
+    if suffix == ".docx":
+        return docx2txt.process(str(path)) or ""
+    return path.read_text(encoding="utf-8", errors="ignore")  # .txt / .md

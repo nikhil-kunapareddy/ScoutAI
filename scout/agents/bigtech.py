@@ -1,16 +1,10 @@
-"""BigTech Agent: a job-search assistant for big-tech AI/ML roles."""
+"""BigTech Agent: job search for AI/ML roles at big tech companies."""
 
 from __future__ import annotations
 
 from ..core.agent import AgentSpec
-from ..tools import (
-    amazon_jobs,
-    datetime_tools,
-    google_jobs,
-    greenhouse_jobs,
-    location,
-    netflix_jobs,
-)
+from ..tools import clock, location
+from ..tools.jobs import amazon, google, greenhouse, netflix
 
 SYSTEM_PROMPT = (
     "You are BigTech Agent, a concise job-search assistant focused on AI/ML roles "
@@ -28,7 +22,6 @@ SPEC = AgentSpec(
     key="bigtech",
     name="BigTech Agent",
     system_prompt=SYSTEM_PROMPT,
-    tool_modules=[datetime_tools, location, amazon_jobs, google_jobs,
-                  netflix_jobs, greenhouse_jobs],
-    default_backend="ollama",
-)
+    tool_modules=[clock, location, amazon, google, netflix, greenhouse],
+    tailor_with_resume=True,  # supplies the candidate profile the prompt expects
+)  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)

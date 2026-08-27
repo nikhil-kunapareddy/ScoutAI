@@ -1,0 +1,50 @@
+[project]
+name = "scout"
+version = "0.1.0"
+description = "A small multi-agent platform for Slack-based AI agents (job search, resume-tailored)."
+requires-python = ">=3.10"
+dependencies = [
+    "slack-bolt>=1.20.0",
+    "anthropic>=1.0.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "pypdf>=4.0.0",
+    "docx2txt>=0.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
+
+[project.scripts]
+scout = "run:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Run the suite from a checkout without installing the package.
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+]
+ignore = [
+    # The job tools deliberately swallow every network/parse failure so one dead
+    # source can't fail a whole turn; each site documents why.
+    "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private helpers on purpose — that's where the parsing lives.
+"tests/*" = ["S101"]
