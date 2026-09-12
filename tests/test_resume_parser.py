@@ -8,16 +8,14 @@ asked for. None of that should break the pipeline.
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from scout.agents import resume_parser
 from scout.agents.resume_parser import CandidateProfile, parse_profile
 from scout.agents.resume_tailored import ResumeTailoredAgent
-from scout.core import agent as agent_module
-from scout.core import settings
-from scout.core.agent import ConversationalAgent
-from scout.core.backends.base import ChatResult
+from scout.core.agent import STUCK_REPLY, ConversationalAgent
 
-from .conftest import ScriptedBackend
+from .conftest import calls_tool, texts
 
 FULL_JSON = """
 {
@@ -87,13 +85,10 @@ def test_empty_profile_still_renders_a_header() -> None:
 
 
 @pytest.fixture
-def pipeline(monkeypatch, spec):
-    """A ResumeTailoredAgent wired to one scripted backend."""
-    backend = ScriptedBackend("primary")
-    monkeypatch.setattr(agent_module, "build_backends", lambda: {"primary": backend})
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "primary")  # no fallback
+def pipeline(monkeypatch, chat_models, spec):
+    """A ResumeTailoredAgent over the scripted models, sharing one of them."""
     monkeypatch.setattr(resume_parser.SPEC, "default_backend", "primary")
-    return ResumeTailoredAgent(spec), backend
+    return ResumeTailoredAgent(spec), chat_models["primary"]
 
 
 def test_pipeline_satisfies_the_adapter_interface(pipeline) -> None:
@@ -102,63 +97,91 @@ def test_pipeline_satisfies_the_adapter_interface(pipeline) -> None:
     assert agent.name == "Test Agent (resume-tailored)"
 
 
-def test_first_turn_parses_the_resume_then_prefixes_the_brief(pipeline) -> None:
-    agent, backend = pipeline
-    backend.results = [
-        ChatResult(text='{"titles": ["ML Engineer"]}'),  # the parser stage
-        ChatResult(text="here are some roles"),          # the job stage
+def test_first_turn_parses_the_resume_then_tailors_the_instructions(pipeline) -> None:
+    agent, model = pipeline
+    model.replies = [
+        AIMessage('{"titles": ["ML Engineer"]}'),  # the parser stage
+        AIMessage("here are some roles"),          # the job stage
     ]
 
     assert agent.respond("U1", "find me jobs") == "here are some roles"
 
-    job_prompt = backend.seen[1][-1]["content"]
-    assert job_prompt.startswith("Candidate profile")
-    assert "- Target titles: ML Engineer" in job_prompt
-    assert job_prompt.endswith("User request: find me jobs")
+    # The brief rides in the job agent's instructions, not in the user's turn.
+    instructions, request = model.seen[1][0], model.seen[1][-1]
+    assert instructions.type == "system"
+    assert instructions.text.startswith("You are a test agent.")
+    assert "- Target titles: ML Engineer" in instructions.text
+    assert request.text == "find me jobs"
+
+
+def test_the_parsers_own_turn_stays_out_of_the_job_history(pipeline) -> None:
+    """The parser runs on its own thread, so its JSON reply and the request that
+    produced it never reach the job agent's conversation."""
+    agent, model = pipeline
+    model.replies = [AIMessage('{"titles": ["ML Engineer"]}'), AIMessage("roles")]
+    agent.respond("U1", "find me jobs")
+
+    assert texts(model.seen[0])[1] == "Extract my candidate profile."
+    job_turn = texts(model.seen[1])
+    assert "Extract my candidate profile." not in job_turn
+    assert '{"titles": ["ML Engineer"]}' not in job_turn
 
 
 def test_brief_is_cached_after_the_first_turn(pipeline) -> None:
-    agent, backend = pipeline
-    backend.results = [
-        ChatResult(text='{"titles": ["ML Engineer"]}'),
-        ChatResult(text="first"),
-        ChatResult(text="second"),
+    agent, model = pipeline
+    model.replies = [
+        AIMessage('{"titles": ["ML Engineer"]}'),
+        AIMessage("first"),
+        AIMessage("second"),
     ]
 
     agent.respond("U1", "one")
     agent.respond("U1", "two")
 
     # Three model calls total: one parse plus two job turns (no re-parse).
-    assert len(backend.seen) == 3
-    assert "- Target titles: ML Engineer" in backend.seen[2][-1]["content"]
+    assert len(model.seen) == 3
+    assert "- Target titles: ML Engineer" in model.seen[2][0].text
 
 
 def test_reset_forces_a_re_parse(pipeline) -> None:
-    agent, backend = pipeline
-    backend.results = [ChatResult(text='{"titles": ["A"]}'), ChatResult(text="ok")]
+    agent, model = pipeline
+    model.replies = [AIMessage('{"titles": ["A"]}'), AIMessage("ok")]
     agent.respond("U1", "one")
 
     agent.reset("U1")
-    backend.results = [ChatResult(text='{"titles": ["B"]}'), ChatResult(text="ok")]
+    model.replies = [AIMessage('{"titles": ["B"]}'), AIMessage("ok")]
     agent.respond("U1", "two")
 
-    assert "- Target titles: B" in backend.seen[-1][-1]["content"]
+    assert "- Target titles: B" in model.seen[-1][0].text
 
 
-def test_both_stages_switch_backend_together(monkeypatch, spec) -> None:
+def test_the_job_stage_still_gets_its_full_tool_budget(pipeline, monkeypatch) -> None:
+    """The parse and job-agent nodes are extra super-steps on top of the tool
+    loop, so the recursion limit has to leave room for them."""
+    from scout.core import settings
+
+    monkeypatch.setattr(settings, "MAX_TOOL_HOPS", 3)
+    agent, model = pipeline
+    model.replies = [
+        AIMessage('{"titles": ["ML Engineer"]}'),      # the parse
+        *[calls_tool("echo") for _ in range(10)],      # a job stage that never stops
+    ]
+
+    assert agent.respond("U1", "find me jobs") == STUCK_REPLY
+    assert len(model.seen) == 1 + 3  # the parse, then three job-stage calls
+
+
+def test_both_stages_switch_backend_together(monkeypatch, chat_models, spec) -> None:
     """A mid-conversation switch must not leave the pipeline half on one model."""
-    primary, other = ScriptedBackend("primary"), ScriptedBackend("other")
-    monkeypatch.setattr(agent_module, "build_backends",
-                        lambda: {"primary": primary, "other": other})
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "primary")
     monkeypatch.setattr(resume_parser.SPEC, "default_backend", "primary")
+    primary, other = chat_models["primary"], chat_models["fallback"]
     agent = ResumeTailoredAgent(spec)
 
-    assert agent.set_backend("U1", "other") is True
-    assert agent.backend_label("U1") == "Scripted (other)"
+    assert agent.set_backend("U1", "fallback") is True
+    assert agent.backend_label("U1") == "Scripted (fallback)"
 
-    other.results = [ChatResult(text='{"titles": ["X"]}'), ChatResult(text="ok")]
+    other.replies = [AIMessage('{"titles": ["X"]}'), AIMessage("ok")]
     agent.respond("U1", "jobs")
 
-    assert len(other.seen) == 2  # both the parse and the job turn went to "other"
+    assert len(other.seen) == 2  # both the parse and the job turn went to "fallback"
     assert primary.seen == []

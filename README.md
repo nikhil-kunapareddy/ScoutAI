@@ -1,7 +1,8 @@
 # Scout
 
-A small **multi-agent platform** for Slack-based AI agents. Each agent is a Slack
-DM bot backed by the hosted [Anthropic Claude API](https://docs.claude.com)
+A small **multi-agent platform** for Slack-based AI agents, built on
+[LangGraph](https://langchain-ai.github.io/langgraph/). Each agent is a Slack DM
+bot backed by the hosted [Anthropic Claude API](https://docs.claude.com)
 (default), a local LLM (via [Ollama](https://ollama.com)), or the hosted
 [Meta Llama API](https://llama.developer.meta.com) — switchable per-user at
 runtime — and can call tools for live information.
@@ -18,26 +19,41 @@ Adding another agent is one small file — see [Adding an agent](#adding-an-agen
 
 ## Architecture
 
+Built on [LangGraph](https://langchain-ai.github.io/langgraph/): each agent is a
+compiled state graph, and the resume hand-off is a graph of its own.
+
 ```
 Slack DM
    │
    ▼
 scout/slack/bot.py ────── SlackBot: DM handling + text commands (--claude, --reset, …)
-   │  talks only to ConversationalAgent, so it needs no pipeline knowledge
+   │  talks only to ConversationalAgent, so it needs no graph knowledge
    ▼
-scout/agents/resume_tailored.py   resume profile ──▶ job agent
-   │                              (when a spec sets tailor_with_resume)
-   ▼
-scout/core/agent.py ───── Agent: conversation history + tool-call loop (per-user
-   │                      backend, replayed on the fallback backend if it fails)
+scout/core/agent.py ───── GraphRunner: one checkpointer thread per user (that
+   │                      thread is their history) + their chosen model
+   │
+   │   the graph every agent compiles to:
+   │
+   │       START ──▶ model ──tool calls?──▶ tools ──┐
+   │                    │ none                      │
+   │                    ▼                           │
+   │                   END      ◀───────────────────┘
+   │
+   │   wrapped, for a resume-tailored agent (scout/agents/resume_tailored.py):
+   │
+   │       START ──▶ (profile cached?) ──yes──▶ job_agent ──▶ END
+   │                      │ no                  (subgraph)
+   │                      ▼                          ▲
+   │                parse_resume ─── profile ────────┘
+   │
    │ (model request)          │ (tool calls)          ▲ declared by
    ▼                          ▼                       │
-scout/core/backends/     scout/tools/ ─ ToolRegistry   scout/agents/*.py (AgentSpec)
-   ├── anthropic_api.py     ├── clock.py         get_current_time, get_current_date
-   ├── ollama.py            ├── location.py      get_location
-   └── llama_api.py         ├── resume.py        get_resume_profile
-        (all ChatBackend)   └── jobs/            one module per source
-                                ├── amazon.py            search_amazon_jobs
+scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (AgentSpec)
+   ├── ChatAnthropic        ├── clock.py         get_current_time, get_current_date
+   ├── ChatOllama           ├── location.py      get_location
+   └── ChatOpenAI           ├── resume.py        get_resume_profile
+       (Llama, OpenAI-      └── jobs/            one module per source
+        compatible)             ├── amazon.py            search_amazon_jobs
                                 ├── google.py            search_google_jobs
                                 ├── netflix.py           search_netflix_jobs
                                 ├── greenhouse.py        search_greenhouse_jobs
@@ -46,32 +62,35 @@ scout/core/backends/     scout/tools/ ─ ToolRegistry   scout/agents/*.py (Agen
 ```
 
 An `AgentSpec` declares an agent (name, system prompt, tool set, default backend,
-whether to tailor to the resume). `Agent` runs it: the chosen backend decides when
-to call a tool, `Agent` runs the registered Python function in-process and feeds
-the result back, and the model folds it into its reply.
+whether to tailor to the resume). `build_agent_graph` turns it into the loop
+above: the chosen model decides when to call a tool, the `tools` node runs the
+registered Python function in-process and feeds the result back, and the model
+folds it into its reply.
 
-Two abstractions keep the layers apart:
+Three seams keep the layers apart:
 
-- **`ChatBackend`** (`scout/core/backends/base.py`) — one provider, normalized.
-  Adding a model provider means one module plus one line in `_BACKEND_CLASSES`.
+- **LangChain chat models** (`scout/core/models.py`) — one provider each, built
+  on first use. Adding a model provider means one builder plus one line in
+  `_BUILDERS`.
 - **`ConversationalAgent`** (`scout/core/agent.py`) — what the Slack layer needs
-  from an agent. Both a plain `Agent` and the two-stage `ResumeTailoredAgent`
-  implement it, so the adapter has no special cases.
+  from an agent. `GraphRunner` implements it once, for both a plain `Agent` and
+  the two-stage `ResumeTailoredAgent`, so the adapter has no special cases.
+- **`AgentSpec`** — adding an agent never touches the graph.
 
 ## Project layout
 
 | Path | Purpose |
 |------|---------|
 | `run.py` | Entry point — runs the agent named by `AGENT` (default `bigtech`) |
-| `scout/core/agent.py` | `AgentSpec`, the `ConversationalAgent` interface, and the `Agent` runtime |
+| `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and the `GraphRunner` runtime |
 | `scout/core/settings.py` | Shared config from `.env` (tokens, models, limits, timeouts) |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/core/paths.py` | Filesystem paths (no env dependencies) |
-| `scout/core/backends/` | One module per model backend (Claude, Ollama, Llama API) |
+| `scout/core/models.py` | One LangChain chat model per backend (Claude, Ollama, Llama API) |
 | `scout/tools/` | Tool library + registry; `clock`, `location`, `resume` |
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds what they share |
 | `scout/slack/bot.py` | Slack adapter — `SlackBot` wires an agent to Slack DMs |
-| `scout/agents/` | One `AgentSpec` per agent, plus the hand-off (`resume_tailored.py`) |
+| `scout/agents/` | One `AgentSpec` per agent, plus the orchestration graph (`resume_tailored.py`) |
 | `tests/` | pytest suite — no network, no credentials needed |
 | `Dockerfile` | Worker image for ECS / GCE / Cloud Run worker pools |
 | `data/` | Your resume(s) — read by `get_resume_profile` (git-ignored) |
@@ -133,7 +152,8 @@ tools available. For example:
 
 Every reply is tailored to the resume in `data/`: on your first message the
 Resume Parser distills it into a profile (target titles, skills, search
-keywords), which is cached per-user and prepended to every job-search turn.
+keywords). That profile is cached in the graph's state, so the parse happens once
+per user, and it is appended to the job agent's instructions on every turn.
 
 ## Commands
 
@@ -153,16 +173,18 @@ Agents start on **Claude** (`ANTHROPIC_MODEL`, default `claude-opus-5`) when
 can switch at any time; the choice persists per-user until changed, and resets to
 the default on restart.
 
-Conversation history is stored as plain text and shared across backends, so you
-can switch mid-conversation without losing context.
+Conversation history is stored as provider-agnostic LangChain messages in a
+checkpointer thread, so you can switch mid-conversation without losing context —
+each integration renders that history into its own wire format.
 
 ### Fallback
 
-If a turn fails on the chosen backend — missing key, rate limit, outage, timeout —
-the whole turn is replayed once on `FALLBACK_BACKEND` (default `ollama`) and the
-reply carries a note saying so. Because history holds only plain text, nothing
-from the failed attempt leaks into the retry. Your chosen backend isn't changed,
-so the next message tries it again.
+If a model call fails on the chosen backend — missing key, rate limit, outage,
+timeout — it is retried once on `FALLBACK_BACKEND` (default `ollama`) and the
+reply carries a note saying so. The retry happens inside the graph's `model`
+node, so nothing from the failed call is recorded (a node that raises commits no
+messages) while any tool results the turn already fetched are kept. Your chosen
+backend isn't changed, so the next message tries it again.
 
 ## Deployment
 
@@ -243,35 +265,41 @@ needs three changes, none of which exist yet:
    real turn takes 10–60s. Ack immediately, do the work in a background worker,
    and post the reply with `chat.postMessage` — plus **dedupe on the Slack event
    id**, or a slow cold start gets you three replies to one message.
-3. **Persistence.** Conversation history and the parsed resume profile are held
-   in memory, so a container that scales to zero re-parses the resume (a PDF read
-   plus a Claude call) before nearly every first message.
+3. **Persistence.** Conversation history and the parsed resume profile both live
+   in the in-memory checkpointer, so a container that scales to zero re-parses the
+   resume (a PDF read plus a Claude call) before nearly every first message.
+   LangGraph makes this the smallest of the three changes: swap `InMemorySaver`
+   for a durable checkpointer (`langgraph-checkpoint-sqlite` or `-postgres`) in
+   `Agent` and `ResumeTailoredAgent`.
 
 ## Development
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 170 tests, no network or credentials required
+pytest                     # 168 tests, no network or credentials required
 ruff check .
 ```
 
-The suite scripts the model backends and stubs every HTTP call, so it runs in CI
+The suite scripts the chat models and stubs every HTTP call, so it runs in CI
 without a `.env`. That's also why `scout.core.settings` never raises on import:
 credentials are validated at start-up by `require_slack_credentials()` instead.
 
 ## Adding a tool
 
 1. Create `scout/tools/your_tool.py` with a `register(reg: ToolRegistry)`
-   function that defines one or more `@reg.tool` functions. The signature and
-   docstring become the JSON schema the model reads, so annotate the parameters
-   and write a Google-style `Args:` block — each entry becomes that parameter's
-   description.
+   function that defines one or more `@reg.tool` functions. Each becomes a
+   LangChain `StructuredTool`: the signature and docstring become the schema the
+   model reads, so annotate the parameters and write a Google-style `Args:` block
+   — each entry becomes that parameter's description.
 2. Add the module to the `tool_modules` of the relevant `AgentSpec` in
    `scout/agents/`.
 3. Restart. The model discovers it automatically.
 
-Tools should never raise for an expected failure (a site being down, a bad
-argument): return a sentence the model can read and act on.
+Tools should never raise for an expected failure (a site being down, no
+results): return a sentence the model can read and act on. Argument *types* are
+checked against the schema before your function runs, so genuinely unparseable
+input (`limit="ten"`) comes back to the model as a readable error and costs one
+extra hop; `clamp_int` still guards the bounds a schema can't express.
 
 For a new job source, add a module under `scout/tools/jobs/`; the package's
 `__init__.py` has the shared pieces — `clamp_int`, `is_ai_ml_role`, and the
@@ -282,15 +310,19 @@ For a new job source, add a module under `scout/tools/jobs/`; the package's
 1. Create `scout/agents/your_agent.py` defining a `SPEC = AgentSpec(...)` with a
    `key`, `name`, `system_prompt`, and `tool_modules` (a subset of `scout/tools/`).
    `default_backend` is optional — omit it to inherit `settings.DEFAULT_BACKEND`.
-   Set `tailor_with_resume=True` to run it behind the Resume Parser hand-off.
+   Set `tailor_with_resume=True` to run it inside the orchestration graph, which
+   puts the Resume Parser stage in front of it.
 2. Register it in `scout/agents/__init__.py` (`AGENTS = {… your_agent.SPEC.key: your_agent.SPEC}`).
 3. Each agent is its own Slack app (separate bot tokens), so run it as a separate
    process with its own `.env`: `AGENT=your_agent python run.py`.
 
 ## Operational notes
 
-- Conversation history is per-user and in memory (last `MAX_TURNS` exchanges).
-  `--reset` or a restart clears it; there is no persistence.
+- Conversation history is per-user and in memory: one LangGraph `InMemorySaver`
+  thread per Slack user, windowed to the last `MAX_TURNS` messages. Tool calls
+  and their results are kept in that history too, so they count toward the
+  window. `--reset` deletes the thread, and a restart clears everything; there is
+  no persistence.
 - The bot only responds in DMs (`channel_type == "im"`); it ignores channels,
   other bots, and message edits.
 - Long replies are split across several Slack messages on line boundaries, so

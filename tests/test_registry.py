@@ -1,26 +1,31 @@
 """Tool-schema generation and dispatch.
 
 The schema is the model's only description of a tool, so a wrong type or a
-missing description degrades every turn silently. These tests pin the shape.
+missing description degrades every turn silently. These tests pin the shape
+LangChain derives from the signature and the Google-style docstring.
 """
 
 from __future__ import annotations
+
+import pytest
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from pydantic import ValidationError
 
 from scout.tools import build_registry
 from scout.tools.registry import ToolRegistry
 
 
 def schema_for(reg: ToolRegistry, name: str) -> dict:
-    return next(t["function"] for t in reg.schemas if t["function"]["name"] == name)
+    """The tool's schema as a provider sees it."""
+    tool = next(t for t in reg.tools if t.name == name)
+    return convert_to_openai_tool(tool)["function"]
 
 
 def test_annotations_map_to_json_types() -> None:
-    """Regression: ``from __future__ import annotations`` used to make every
-    parameter a string, because the annotation arrives as the text "int"."""
     reg = ToolRegistry()
 
     @reg.tool
-    def sample(text: str, count: int, ratio: float, flag: bool, untyped=None) -> str:
+    def sample(text: str, count: int, ratio: float, flag: bool) -> str:
         """Do a thing."""
         return ""
 
@@ -29,7 +34,6 @@ def test_annotations_map_to_json_types() -> None:
     assert props["count"]["type"] == "integer"
     assert props["ratio"]["type"] == "number"
     assert props["flag"]["type"] == "boolean"
-    assert props["untyped"]["type"] == "string"  # unannotated falls back to string
 
 
 def test_required_lists_only_parameters_without_defaults() -> None:
@@ -63,9 +67,9 @@ def test_docstring_splits_into_summary_and_parameter_descriptions() -> None:
         return ""
 
     fn = schema_for(reg, "sample")
-    assert fn["description"] == (
-        "Search a thing and return results.\n\nRoles are listed newest-first."
-    )
+    assert fn["description"].startswith("Search a thing and return results.")
+    assert "Roles are listed newest-first." in fn["description"]
+
     props = fn["parameters"]["properties"]
     # The wrapped continuation line is joined back into one description.
     assert props["keywords"]["description"] == (
@@ -77,6 +81,7 @@ def test_docstring_splits_into_summary_and_parameter_descriptions() -> None:
 
 
 def test_docstring_without_args_block_becomes_the_whole_description() -> None:
+    """A no-argument tool must still register — most of ours have no Args: block."""
     reg = ToolRegistry()
 
     @reg.tool
@@ -86,10 +91,10 @@ def test_docstring_without_args_block_becomes_the_whole_description() -> None:
 
     fn = schema_for(reg, "sample")
     assert fn["description"] == "Return the current time."
-    assert fn["parameters"] == {"type": "object", "properties": {}, "required": []}
+    assert fn["parameters"]["properties"] == {}
 
 
-def test_call_dispatches_and_stringifies() -> None:
+def test_tools_are_callable_with_their_arguments() -> None:
     reg = ToolRegistry()
 
     @reg.tool
@@ -97,15 +102,24 @@ def test_call_dispatches_and_stringifies() -> None:
         """Add two numbers."""
         return a + b
 
-    assert reg.call("add", {"a": 2, "b": 3}) == "5"
-    assert reg.call("add", {}) == "0"
-    assert reg.call("add", None) == "0"
+    tool = reg.tools[0]
+    assert tool.invoke({"a": 2, "b": 3}) == 5
+    assert tool.invoke({}) == 0
 
 
-def test_unknown_tool_is_reported_not_raised() -> None:
-    """The model gets a readable message and can correct itself next hop."""
+def test_arguments_are_validated_before_the_tool_runs() -> None:
+    """Junk the schema forbids is rejected, so it reaches the model as an error
+    (the ``tools`` node turns this into a ToolMessage) rather than the tool."""
     reg = ToolRegistry()
-    assert reg.call("nope", {}) == "Unknown tool: nope"
+
+    @reg.tool
+    def add(a: int = 0) -> int:
+        """Add a number."""
+        return a
+
+    assert reg.tools[0].invoke({"a": "5"}) == 5  # coercible, so it goes through
+    with pytest.raises(ValidationError):
+        reg.tools[0].invoke({"a": "five"})
 
 
 def test_build_registry_runs_each_module_in_order(echo_tool_module) -> None:

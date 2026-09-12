@@ -48,9 +48,13 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 
 # --- Meta Llama API (hosted) ---
+# Reached through Meta's OpenAI-compatible endpoint, so this is a *base* URL and
+# not the full chat-completions path the old hand-rolled POST needed. Replaces
+# LLAMA_API_URL, which is ignored: trimming it would yield a non-compat base
+# that fails at request time instead of here.
 LLAMA_API_KEY = os.environ.get("LLAMA_API_KEY", "")
-LLAMA_API_URL = os.environ.get("LLAMA_API_URL", "https://api.llama.com/v1/chat/completions")
 LLAMA_MODEL = os.environ.get("LLAMA_MODEL", "Llama-4-Maverick-17B-128E-Instruct-FP8")
+LLAMA_BASE_URL = os.environ.get("LLAMA_BASE_URL", "https://api.llama.com/compat/v1")
 
 # --- Backend selection ---
 # Agents start on Claude and fall back to the local model for one turn when a

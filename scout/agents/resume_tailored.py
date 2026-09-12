@@ -1,13 +1,19 @@
-"""The resume-parser → job-search hand-off.
+"""The resume-parser → job-search hand-off, as one graph::
 
-``ResumeTailoredAgent`` composes two plain ``Agent``s into one
-``ConversationalAgent``:
+    START ──▶ (profile cached?) ──yes──▶ job_agent ──▶ END
+                    │                    (subgraph)
+                    │ no                     ▲
+                    ▼                        │
+              parse_resume ─── profile ──────┘
 
-    resume_parser  ──CandidateProfile──▶  job agent (bigtech, university, …)
+``parse_resume`` runs the Resume Parser on its own graph and its own thread, so
+the parser's tool calls and JSON reply never land in the job agent's history —
+all it contributes to the conversation is ``profile``, the rendered brief.
 
-The parser runs once per user; the rendered brief is cached and prepended to
-every later job-search turn. Job agents therefore never read the resume
-themselves — the profile only reaches them through this hand-off.
+Because ``profile`` lives in the checkpoint, the router skips the parse on every
+later turn: the cache *is* the state, not a dict kept beside it. Job agents never
+read the resume themselves; the brief reaches them appended to their instructions
+(see ``_instructions`` in ``scout/core/agent.py``).
 
 Opting in is one flag on an ``AgentSpec``: ``tailor_with_resume=True``.
 """
@@ -16,7 +22,18 @@ from __future__ import annotations
 
 import logging
 
-from ..core.agent import Agent, AgentSpec, ConversationalAgent
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from ..core.agent import (
+    AgentSpec,
+    AgentState,
+    GraphRunner,
+    agent_tools,
+    build_agent_graph,
+)
 from .resume_parser import SPEC as RESUME_SPEC
 from .resume_parser import parse_profile
 
@@ -25,55 +42,80 @@ log = logging.getLogger("scout")
 #: What we ask the parser for; its system prompt does the real work.
 _PARSE_REQUEST = "Extract my candidate profile."
 
+#: The parser's thread for a user, kept apart from their job-search thread.
+_PARSER_THREAD = "{user_id}:resume"
 
-class ResumeTailoredAgent(ConversationalAgent):
-    """Runs ``job_spec`` with every turn prefixed by the user's resume profile."""
+
+class ResumeTailoredAgent(GraphRunner):
+    """Runs ``job_spec`` with the user's resume profile in its instructions."""
+
+    # This graph's own two nodes, parse_resume and job_agent. The tool loop runs
+    # inside the subgraph, which gets the recursion limit afresh.
+    _min_steps = 2
 
     def __init__(self, job_spec: AgentSpec) -> None:
-        self.name = f"{job_spec.name} (resume-tailored)"
-        self._parser = Agent(RESUME_SPEC)
-        self._jobs = Agent(job_spec)
-        # user_id -> rendered brief. dict get/set is atomic under the GIL; a
-        # same-user race just re-parses, and Agent serializes each user's turns.
-        self._briefs: dict[str, str] = {}
+        self._parser_checkpointer = InMemorySaver()
+        self._parser = build_agent_graph(RESUME_SPEC, agent_tools(RESUME_SPEC)).compile(
+            checkpointer=self._parser_checkpointer
+        )
 
-    def respond(self, user_id: str, prompt: str) -> str:
-        brief = self._brief_for(user_id)
-        return self._jobs.respond(user_id, f"{brief}\n\nUser request: {prompt}")
+        job_tools = agent_tools(job_spec)
+        checkpointer = InMemorySaver()
+        builder = StateGraph(AgentState)
+        builder.add_node("parse_resume", self._parse_resume)
+        # Compiled with no checkpointer of its own: as a subgraph it inherits
+        # this graph's, so the job conversation lives in the user's thread.
+        builder.add_node("job_agent", build_agent_graph(job_spec, job_tools).compile())
+        builder.add_conditional_edges(
+            START,
+            _needs_profile,
+            {"parse_resume": "parse_resume", "job_agent": "job_agent"},
+        )
+        builder.add_edge("parse_resume", "job_agent")
+        builder.add_edge("job_agent", END)
 
-    def _brief_for(self, user_id: str) -> str:
-        """The user's cached brief, parsing their resume on first use."""
-        brief = self._briefs.get(user_id)
-        if brief is None:
-            raw = self._parser.respond(user_id, _PARSE_REQUEST)
-            brief = parse_profile(raw).to_search_brief()
-            self._briefs[user_id] = brief
-            log.info("Parsed resume profile for %s", user_id)
-        return brief
+        super().__init__(
+            name=f"{job_spec.name} (resume-tailored)",
+            graph=builder.compile(checkpointer=checkpointer),
+            checkpointer=checkpointer,
+            default_backend=job_spec.default_backend,
+            # The parser's only tool is the resume reader; the job tools are the
+            # ones worth logging at start-up.
+            tools=job_tools,
+        )
+
+    def _parse_resume(self, state: AgentState, config: RunnableConfig) -> dict:
+        """Run the Resume Parser and hand its brief on as ``profile``."""
+        user_id = config["configurable"]["thread_id"]
+        reply = self._parser.invoke(
+            {"messages": [HumanMessage(_PARSE_REQUEST)]},
+            {
+                "configurable": {
+                    "thread_id": _PARSER_THREAD.format(user_id=user_id),
+                    # Both stages move together, so a mid-conversation switch
+                    # can't leave the pipeline half on one model.
+                    "backend": config["configurable"].get("backend"),
+                    # Start a fresh checkpoint namespace: this is its own graph,
+                    # not a subgraph of the one calling it.
+                    "checkpoint_ns": "",
+                    "checkpoint_id": None,
+                },
+                "recursion_limit": config["recursion_limit"],
+            },
+        )
+        brief = parse_profile(reply["messages"][-1].text).to_search_brief()
+        log.info("Parsed resume profile for %s", user_id)
+        return {"profile": brief}
 
     def reset(self, user_id: str) -> None:
-        self._parser.reset(user_id)
-        self._jobs.reset(user_id)
-        self._briefs.pop(user_id, None)  # re-parse on the next message
+        # Clearing the thread drops the cached profile with it, so the next
+        # message re-parses.
+        super().reset(user_id)
+        self._parser_checkpointer.delete_thread(
+            _PARSER_THREAD.format(user_id=user_id)
+        )
 
-    def set_backend(self, user_id: str, name: str) -> bool:
-        # Both stages move together, so a mid-conversation switch can't leave the
-        # pipeline half on one model.
-        self._parser.set_backend(user_id, name)
-        return self._jobs.set_backend(user_id, name)
 
-    def backend_name(self, user_id: str) -> str:
-        return self._jobs.backend_name(user_id)
-
-    def backend_label(self, user_id: str) -> str:
-        return self._jobs.backend_label(user_id)
-
-    def last_backend(self, user_id: str) -> str:
-        # The job stage produces the visible reply and both share a backend, so
-        # its view is the one worth reporting.
-        return self._jobs.last_backend(user_id)
-
-    def tool_names(self) -> list[str]:
-        # The parser's only tool is the resume reader; the job tools are the ones
-        # worth logging at start-up.
-        return self._jobs.tool_names()
+def _needs_profile(state: AgentState) -> str:
+    """Parse the resume once per thread; later turns go straight to the job agent."""
+    return "job_agent" if state.get("profile") else "parse_resume"

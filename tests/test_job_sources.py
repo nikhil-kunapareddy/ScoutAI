@@ -56,7 +56,9 @@ class FakeRequests:
 def call(module, tool_name: str, fake: FakeRequests, monkeypatch, **args) -> str:
     """Register ``module``'s tools against a stubbed ``requests`` and call one."""
     monkeypatch.setattr(module, "requests", fake)
-    return build_registry([module]).call(tool_name, args)
+    registry = build_registry([module])
+    tool = next(t for t in registry.tools if t.name == tool_name)
+    return tool.invoke(args)
 
 
 def days_ago(days: int) -> str:

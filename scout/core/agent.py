@@ -1,17 +1,27 @@
-"""The agent runtime: per-user conversation memory plus the tool-call loop.
+"""The agent runtime: one LangGraph state graph per agent, driven per user.
 
 An ``AgentSpec`` describes one agent — name, system prompt, tool set, default
-backend — and ``Agent`` runs it. Adding an agent means writing one spec (see
-``scout/agents/``), not touching this loop.
+backend — and ``build_agent_graph`` turns it into the graph every agent shares::
 
-Each user has their own history and chosen backend, switchable at runtime.
-History holds only plain user/assistant text, which keeps it backend-agnostic: a
-user can switch mid-conversation, and a failed turn can be replayed on
-``settings.FALLBACK_BACKEND``.
+    START ──▶ model ──tool calls?──▶ tools ──┐
+                 │                           │
+                 │ none                      │
+                 ▼                           │
+                END      ◀───────────────────┘
 
-``ConversationalAgent`` is the interface the Slack adapter talks to. ``Agent``
-implements it for a single model; ``scout/agents/resume_tailored.py`` chains two
-of them behind the same interface, so the adapter needs no special cases.
+Adding an agent means writing one spec (see ``scout/agents/``), not touching
+this graph.
+
+``GraphRunner`` drives a compiled graph for many users: each gets their own
+checkpointer thread — that thread *is* their conversation history — and their
+chosen backend rides along in the graph config, so one compiled graph serves
+every user on every model. Because history is stored as provider-agnostic
+message objects, a user can switch model mid-conversation and a failed model
+call can be retried on ``settings.FALLBACK_BACKEND`` inside the same turn.
+
+``ConversationalAgent`` is the interface the Slack adapter codes against.
+``Agent`` implements it for a single graph; ``scout/agents/resume_tailored.py``
+puts a resume-parsing stage in front of one behind the same interface.
 """
 
 from __future__ import annotations
@@ -19,19 +29,40 @@ from __future__ import annotations
 import logging
 import threading
 from abc import ABC, abstractmethod
-from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from types import ModuleType
 
-from ..tools import ToolRegistry, build_registry
-from . import settings
-from .backends import ChatBackend, build_backends
-from .backends.base import ToolCall
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    trim_messages,
+)
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
+from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from ..tools import build_registry
+from . import models, settings
 
 log = logging.getLogger("scout")
 
-#: One history entry: plain text, no provider-specific content blocks.
-Message = dict[str, str]
+#: Reply when a turn used up its tool hops without answering.
+STUCK_REPLY = "Sorry, I got stuck calling my tools. Please try rephrasing."
+
+#: Stands in for the result of a tool call abandoned at the hop limit.
+STUCK_TOOL_RESULT = "Stopped: this turn ran out of tool calls."
+
+#: Reply when the model returns neither text nor a tool call (a refusal, or a
+#: max_tokens cut-off).
+EMPTY_REPLY = "The model returned an empty reply. Please try rephrasing."
 
 
 @dataclass
@@ -43,16 +74,30 @@ class AgentSpec:
     system_prompt: str
     tool_modules: list[ModuleType] = field(default_factory=list)  # each has register(reg)
     default_backend: str = settings.DEFAULT_BACKEND
-    # Run behind the resume-parser hand-off, prefixing every turn with a profile
-    # distilled from the user's resume. See scout/agents/resume_tailored.py.
+    # Run behind the resume-parser stage, which appends a profile distilled from
+    # the user's resume to this agent's instructions. See resume_tailored.py.
     tailor_with_resume: bool = False
+
+
+class AgentState(MessagesState):
+    """Graph state: the conversation plus what the run needs to report itself.
+
+    ``MessagesState`` supplies ``messages`` with the ``add_messages`` reducer, so
+    nodes return the messages they add rather than the whole list.
+    """
+
+    #: Candidate brief from the resume parser; "" for agents that don't use one.
+    profile: str
+    #: Backend that produced the last reply — the fallback, if the chosen one failed.
+    answered_by: str
 
 
 class ConversationalAgent(ABC):
     """What the Slack adapter needs from an agent, however it's built.
 
-    Implemented by ``Agent`` and by ``ResumeTailoredAgent``. Coding the adapter
-    against this is what keeps ``scout/slack/`` free of pipeline knowledge.
+    Implemented by ``GraphRunner``, and so by both ``Agent`` and
+    ``ResumeTailoredAgent``. Coding the adapter against this is what keeps
+    ``scout/slack/`` free of graph knowledge.
     """
 
     #: Display name, used in start-up logs.
@@ -87,22 +132,135 @@ class ConversationalAgent(ABC):
         """Tools this agent can call, for start-up diagnostics."""
 
 
-class Agent(ConversationalAgent):
-    """Runs one ``AgentSpec``: holds conversation state and drives the tool loop."""
+# --- Building the graph ----------------------------------------------------
 
-    def __init__(self, spec: AgentSpec):
-        self.spec = spec
-        self.name = spec.name
-        self.tools: ToolRegistry = build_registry(spec.tool_modules)
-        self._backends = build_backends()
-        # Per-user state. These grow with the number of distinct users (bounded by
-        # the workspace) and are never evicted: dropping someone's history behind
-        # their back would be surprising.
-        self._histories: dict[str, deque[Message]] = defaultdict(
-            lambda: deque(maxlen=settings.MAX_TURNS * 2)
-        )
+
+def agent_tools(spec: AgentSpec) -> list[BaseTool]:
+    """The tools ``spec`` asked for, as LangChain tools."""
+    return build_registry(spec.tool_modules).tools
+
+
+def build_agent_graph(spec: AgentSpec, tools: list[BaseTool]) -> StateGraph:
+    """Build — but don't compile — the model/tools graph for ``spec``.
+
+    Left uncompiled so the caller owns the checkpointer: a top-level agent gets
+    its own, while a graph embedded as a subgraph inherits its parent's.
+    """
+    builder = StateGraph(AgentState)
+    builder.add_node("model", _model_node(spec, tools))
+    builder.add_node("tools", ToolNode(tools, handle_tool_errors=_tool_error))
+    builder.add_edge(START, "model")
+    # tools_condition routes to "tools" when the reply asked for one, else END.
+    builder.add_conditional_edges("model", tools_condition)
+    builder.add_edge("tools", "model")
+    return builder
+
+
+def _model_node(spec: AgentSpec, tools: list[BaseTool]):
+    """The node that calls the model, retrying once on the fallback backend."""
+
+    def call_model(state: AgentState, config: RunnableConfig) -> dict:
+        chosen = config["configurable"].get("backend") or spec.default_backend
+        messages = [
+            SystemMessage(_instructions(spec, state.get("profile", ""))),
+            *_within_window(state["messages"]),
+        ]
+
+        try:
+            reply = models.with_tools(chosen, tools).invoke(messages, config)
+            answered = chosen
+        except Exception:
+            fallback = _fallback_for(chosen)
+            if fallback is None:
+                raise
+            # Retried here rather than around the whole turn so tool results
+            # already fetched are kept, and nothing from the failed call is
+            # recorded: a node that raises commits no messages.
+            log.exception("Backend %s failed; retrying on %s", chosen, fallback)
+            reply = models.with_tools(fallback, tools).invoke(messages, config)
+            answered = fallback
+
+        return {"messages": [reply], "answered_by": answered}
+
+    return call_model
+
+
+def _instructions(spec: AgentSpec, profile: str) -> str:
+    """The system prompt, with the candidate brief appended when there is one."""
+    return f"{spec.system_prompt}\n\n{profile}" if profile else spec.system_prompt
+
+
+def _within_window(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """The tail of the conversation to send, bounded by ``MAX_TURNS``.
+
+    ``start_on="human"`` is what keeps the request valid wherever the window
+    falls: providers expect a conversation to open on the user's side, and a
+    tool result must never lead it or be separated from the call it answers.
+
+    Tool traffic is checkpointed now, so it counts against the window — the
+    model remembers what it already looked up, at the cost of a shorter reach
+    back through a tool-heavy conversation.
+    """
+    return trim_messages(
+        messages,
+        strategy="last",
+        token_counter=len,  # count messages, not tokens
+        max_tokens=settings.MAX_TURNS * 2,
+        start_on="human",
+        include_system=False,
+        allow_partial=False,
+    )
+
+
+def _fallback_for(chosen: str) -> str | None:
+    """The backend to retry a failed model call on, or None if there isn't one.
+
+    An empty ``FALLBACK_BACKEND`` disables the retry, which is what the
+    container image wants: there is no Ollama in it, so retrying would only make
+    every Claude failure fail twice.
+    """
+    name = settings.FALLBACK_BACKEND
+    if not name or name == chosen or not models.exists(name):
+        return None
+    return name
+
+
+def _tool_error(exc: Exception) -> str:
+    """Turn a tool failure into text the model can read and act on."""
+    log.warning("Tool failed: %s", exc)
+    return f"Error running tool: {exc}"
+
+
+# --- Driving the graph ----------------------------------------------------
+
+
+class GraphRunner(ConversationalAgent):
+    """Runs one compiled graph for many Slack users.
+
+    Owns everything that is per-user rather than per-graph: the checkpointer
+    thread, the chosen backend, and the lock that serializes a user's turns.
+    """
+
+    #: Floor on the recursion limit: the super-steps this graph needs outside the
+    #: model/tools loop. Subclasses that wrap the loop in more nodes raise it.
+    #: It is a floor and not an addition because a subgraph is given the limit
+    #: afresh, so adding to it would hand the inner loop extra tool hops.
+    _min_steps = 1
+
+    def __init__(
+        self,
+        name: str,
+        graph: CompiledStateGraph,
+        checkpointer: BaseCheckpointSaver,
+        default_backend: str,
+        tools: list[BaseTool],
+    ) -> None:
+        self.name = name
+        self._graph = graph
+        self._checkpointer = checkpointer
+        self._default_backend = default_backend
+        self._tools = tools
         self._chosen_backend: dict[str, str] = {}
-        self._answering_backend: dict[str, str] = {}  # who actually answered last
 
         # slack-bolt dispatches events on a thread pool. One lock per user
         # serializes that user's turns while other users run concurrently;
@@ -111,7 +269,7 @@ class Agent(ConversationalAgent):
         self._locks: dict[str, threading.RLock] = {}
 
     def tool_names(self) -> list[str]:
-        return self.tools.names()
+        return [tool.name for tool in self._tools]
 
     # --- Per-user state -------------------------------------------------
 
@@ -124,25 +282,38 @@ class Agent(ConversationalAgent):
                 self._locks[user_id] = lock
             return lock
 
+    def _config(self, user_id: str) -> RunnableConfig:
+        """The graph config for one user: their thread and their model."""
+        return {
+            "configurable": {
+                "thread_id": user_id,
+                "backend": self.backend_name(user_id),
+            },
+            # A tool hop is two super-steps (model, then tools) and a turn ends
+            # on a model step, so n model calls is 2n-1 steps.
+            "recursion_limit": max(2 * settings.MAX_TOOL_HOPS - 1, self._min_steps),
+        }
+
     def reset(self, user_id: str) -> None:
         with self._lock_for(user_id):
-            self._histories.pop(user_id, None)
+            self._checkpointer.delete_thread(user_id)
 
     def backend_name(self, user_id: str) -> str:
         # Lock-free: dict.get is atomic under the GIL, and a stale read against a
         # concurrent set_backend is harmless.
-        return self._chosen_backend.get(user_id, self.spec.default_backend)
+        return self._chosen_backend.get(user_id, self._default_backend)
 
     def backend_label(self, user_id: str) -> str:
-        return self._backends[self.backend_name(user_id)].label
+        return models.label(self.backend_name(user_id))
 
     def last_backend(self, user_id: str) -> str:
         """Differs from ``backend_name`` only when the chosen backend failed and
         the fallback answered."""
-        return self._answering_backend.get(user_id, self.backend_name(user_id))
+        state = self._graph.get_state(self._config(user_id))
+        return state.values.get("answered_by") or self.backend_name(user_id)
 
     def set_backend(self, user_id: str, name: str) -> bool:
-        if name not in self._backends:
+        if not models.exists(name):
             return False
         with self._lock_for(user_id):
             self._chosen_backend[user_id] = name
@@ -151,88 +322,63 @@ class Agent(ConversationalAgent):
     # --- Answering a message --------------------------------------------
 
     def respond(self, user_id: str, prompt: str) -> str:
-        """Run ``prompt`` through this user's backend and tool loop.
-
-        If that backend fails (outage, missing key, rate limit) the whole turn is
-        replayed once on ``settings.FALLBACK_BACKEND``. History holds plain text
-        only, so nothing from the failed attempt leaks in, and the user's choice
-        is left alone so the next turn tries it again.
+        """Run ``prompt`` through this user's thread and return the reply.
 
         Holds the user's lock for the whole turn, serializing their messages;
         other users run in parallel.
         """
         with self._lock_for(user_id):
-            history = self._histories[user_id]
-            history.append({"role": "user", "content": prompt})
-
-            chosen = self.backend_name(user_id)
+            config = self._config(user_id)
             try:
-                reply = self._run_turn(self._backends[chosen], history)
-                self._answering_backend[user_id] = chosen
-            except Exception:
-                fallback = self._fallback_for(chosen)
-                if fallback is None:
-                    raise
-                log.exception("Backend %s failed; replaying the turn on %s",
-                              chosen, fallback.name)
-                reply = self._run_turn(fallback, history)
-                self._answering_backend[user_id] = fallback.name
+                state = self._graph.invoke(
+                    {"messages": [HumanMessage(prompt)]}, config
+                )
+            except GraphRecursionError:
+                log.warning(
+                    "Hit the %s-hop tool limit without a final answer",
+                    settings.MAX_TOOL_HOPS,
+                )
+                return self._give_up(config)
 
-            history.append({"role": "assistant", "content": reply})
-            return reply
+            return _reply_text(state["messages"][-1])
 
-    def _fallback_for(self, chosen: str) -> ChatBackend | None:
-        """The backend to retry a failed turn on, or None if there isn't one."""
-        name = settings.FALLBACK_BACKEND
-        return None if name == chosen else self._backends.get(name)
+    def _give_up(self, config: RunnableConfig) -> str:
+        """End a turn that ran out of tool hops, leaving a reusable thread.
 
-    def _run_turn(self, backend: ChatBackend, history: deque[Message]) -> str:
-        """One pass of the tool loop against ``backend``; returns the reply text.
-
-        Tool traffic stays in the local ``messages`` list — each backend has its
-        own wire format for it — which is what keeps ``history`` replayable
-        elsewhere.
+        The run stopped with tool calls still unanswered, and providers reject a
+        history where a tool request has no result — so the abandoned calls are
+        answered before the apology is recorded. Skipping this would break the
+        user's *next* message, not just this one.
         """
-        messages: list[dict] = [
-            {"role": "system", "content": self.spec.system_prompt},
-            *_messages_from(history),
+        messages = self._graph.get_state(config).values.get("messages", [])
+        abandoned = getattr(messages[-1], "tool_calls", None) if messages else None
+        answers = [
+            ToolMessage(
+                content=STUCK_TOOL_RESULT, tool_call_id=call["id"], name=call["name"]
+            )
+            for call in abandoned or []
         ]
-
-        for _ in range(settings.MAX_TOOL_HOPS):
-            result = backend.chat(messages, self.tools.schemas)
-
-            if not result.tool_calls:
-                return result.text
-
-            # Record the request, run each tool, feed the results back in this
-            # backend's format, then loop so the model can answer.
-            messages.append(backend.assistant_message(result))
-            for call in result.tool_calls:
-                messages.append(backend.tool_result_message(call, self._run_tool(call)))
-
-        log.warning("Hit the %s-hop tool limit without a final answer",
-                    settings.MAX_TOOL_HOPS)
-        return "Sorry, I got stuck calling my tools. Please try rephrasing."
-
-    def _run_tool(self, call: ToolCall) -> str:
-        """Run one tool call, turning a failure into text the model can read."""
-        try:
-            result = self.tools.call(call.name, call.args)
-        except Exception as e:
-            log.exception("Tool %s failed", call.name)
-            result = f"Error running tool: {e}"
-        log.info("tool %s(%s) -> %s", call.name, call.args, str(result)[:120])
-        return result
+        self._graph.update_state(
+            config, {"messages": [*answers, AIMessage(STUCK_REPLY)]}
+        )
+        return STUCK_REPLY
 
 
-def _messages_from(history: deque[Message]) -> list[Message]:
-    """The history to send, guaranteed to start with a user message.
+class Agent(GraphRunner):
+    """Runs one ``AgentSpec`` as a graph of its own."""
 
-    ``history`` is bounded, so a full deque evicts its oldest entry on append,
-    which can leave an assistant reply at the front. Providers expect a
-    conversation to open on the user's side.
-    """
-    messages = list(history)
-    while messages and messages[0]["role"] != "user":
-        messages.pop(0)
-    return messages
+    def __init__(self, spec: AgentSpec) -> None:
+        tools = agent_tools(spec)
+        checkpointer = InMemorySaver()
+        super().__init__(
+            name=spec.name,
+            graph=build_agent_graph(spec, tools).compile(checkpointer=checkpointer),
+            checkpointer=checkpointer,
+            default_backend=spec.default_backend,
+            tools=tools,
+        )
+
+
+def _reply_text(message: BaseMessage) -> str:
+    """The text of a reply, however the provider shaped its content."""
+    return message.text.strip() or EMPTY_REPLY
