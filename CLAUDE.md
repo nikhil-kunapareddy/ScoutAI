@@ -5,8 +5,9 @@ agent = a system prompt + a set of tools, running on Claude (default), Ollama, o
 the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
 with it, both tailored to the user's resume in `data/`.
 
-The README is the user-facing doc (Slack setup, deployment, env vars). This file
-is the working map and the conventions to keep.
+`README.md` is the short, outward-facing intro; `docs/handbook.md` is the full
+user-facing doc (Slack setup, deployment, env vars). This file is the working map
+and the conventions to keep.
 
 ## Commands
 
@@ -26,7 +27,7 @@ ruff check .
 ```
 
 Deployed on an EC2 `t4g.micro` under systemd; `./deploy/deploy.sh` ships the
-working tree and restarts. See the AWS section of the README.
+working tree and restarts. See the AWS section of docs/handbook.md.
 
 ## Layout
 
@@ -45,6 +46,7 @@ working tree and restarts. See the AWS section of the README.
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
 | `deploy/` | `deploy.sh` plus the systemd units the box runs |
+| `docs/handbook.md` | The full user-facing doc; `README.md` is the short intro |
 
 ## The two graphs
 

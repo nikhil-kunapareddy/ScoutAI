@@ -132,7 +132,7 @@ def require_slack_credentials() -> None:
         raise SystemExit(
             f"Missing required setting(s): {', '.join(missing)}.\n"
             "Copy .env.example to .env and fill in your Slack tokens "
-            "(see the 'One-time Slack setup' section of the README)."
+            "(see the 'One-time Slack setup' section of docs/handbook.md)."
         )
 
 
@@ -155,5 +155,5 @@ def require_digest_config() -> None:
         raise SystemExit(
             f"Missing required setting(s): {', '.join(missing)}.\n"
             "The digest needs a bot token and the Slack user id to DM; see the "
-            "'Daily digest' section of the README."
+            "'Daily digest' section of docs/handbook.md."
         )
