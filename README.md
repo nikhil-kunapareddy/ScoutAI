@@ -44,39 +44,15 @@ Scout  ▸ Three worth a look, ranked against your résumé:
 
 ## How it works
 
-```mermaid
-flowchart TB
-    A["💬 Slack DM"] --> C
-    B["⏰ Daily digest, 08:00"] --> C
+<div align="center">
+  <img src="assets/sys_design.png" alt="Scout system architecture: Slack DM through the ConversationalAgent seam into the agent graph, with state, observability, and AWS deployment" width="100%">
+</div>
 
-    C["<b>ConversationalAgent</b><br/><i>the seam — Slack knows nothing else</i>"]
+A Slack DM enters through a Socket Mode adapter that knows nothing about agents.
+Everything past that point talks to one interface, `ConversationalAgent` — which
+is why a plain agent and the résumé-tailored pipeline take the identical path.
 
-    C --> D{"résumé profile<br/>cached?"}
-    D -- no --> E["Résumé Parser<br/><i>own graph, own thread</i>"]
-    E --> F
-    D -- yes --> F
-
-    subgraph loop ["Agent graph — every agent compiles to this"]
-        F["🧠 model"] -->|tool calls| G["🔧 tools"]
-        G --> F
-    end
-
-    F -->|done| H["📨 reply"]
-
-    G -.-> I["Amazon · Google · Netflix<br/>Greenhouse · Northeastern · BU"]
-    F -.-> J["Claude · Ollama · Llama"]
-    C -.-> K[("SQLite checkpointer<br/>one thread per user")]
-    C -.-> L["📊 metrics · LangSmith · alerts"]
-
-    style C fill:#1C3C3C,color:#fff
-    style loop fill:#0d1117,stroke:#30363d
-    style K fill:#161b22,stroke:#30363d,color:#8b949e
-    style L fill:#161b22,stroke:#30363d,color:#8b949e
-    style I fill:#161b22,stroke:#30363d,color:#8b949e
-    style J fill:#161b22,stroke:#30363d,color:#8b949e
-```
-
-Every agent is **one file** — a system prompt and a list of tools. Adding one
+Every agent is **one file**: a system prompt and a list of tools. Adding one
 never touches the graph.
 
 ## Engineering worth talking about
