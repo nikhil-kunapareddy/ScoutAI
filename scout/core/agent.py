@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from types import ModuleType
@@ -43,14 +44,14 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from ..tools import build_registry
-from . import models, settings
+from . import metrics, models, settings
+from .checkpoints import build_checkpointer
 
 log = logging.getLogger("scout")
 
@@ -329,6 +330,7 @@ class GraphRunner(ConversationalAgent):
         """
         with self._lock_for(user_id):
             config = self._config(user_id)
+            started = time.monotonic()
             try:
                 state = self._graph.invoke(
                     {"messages": [HumanMessage(prompt)]}, config
@@ -338,9 +340,45 @@ class GraphRunner(ConversationalAgent):
                     "Hit the %s-hop tool limit without a final answer",
                     settings.MAX_TOOL_HOPS,
                 )
-                return self._give_up(config)
+                reply = self._give_up(config)
+                self._measure(user_id, config, started, metrics.STUCK)
+                return reply
+            except Exception:
+                self._measure(user_id, config, started, metrics.ERROR)
+                raise
 
+            self._measure(user_id, config, started, metrics.OK, state)
             return _reply_text(state["messages"][-1])
+
+    def _measure(
+        self,
+        user_id: str,
+        config: RunnableConfig,
+        started: float,
+        outcome: str,
+        state: dict | None = None,
+    ) -> None:
+        """Log what the turn cost.
+
+        ``state`` is passed on the happy path because the caller already has it;
+        the other paths read it back, which also picks up the repair ``_give_up``
+        just wrote. Measuring must never be what breaks a reply, hence the catch.
+        """
+        try:
+            values = state if state is not None else self._graph.get_state(config).values
+            metrics.record(
+                metrics.measure(
+                    agent=self.name,
+                    thread=user_id,
+                    backend=self.backend_name(user_id),
+                    answered_by=values.get("answered_by") or self.backend_name(user_id),
+                    outcome=outcome,
+                    seconds=time.monotonic() - started,
+                    messages=values.get("messages", []),
+                )
+            )
+        except Exception:
+            log.exception("Could not record turn metrics")
 
     def _give_up(self, config: RunnableConfig) -> str:
         """End a turn that ran out of tool hops, leaving a reusable thread.
@@ -369,7 +407,7 @@ class Agent(GraphRunner):
 
     def __init__(self, spec: AgentSpec) -> None:
         tools = agent_tools(spec)
-        checkpointer = InMemorySaver()
+        checkpointer = build_checkpointer()
         super().__init__(
             name=spec.name,
             graph=build_agent_graph(spec, tools).compile(checkpointer=checkpointer),

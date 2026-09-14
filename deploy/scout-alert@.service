@@ -1,0 +1,11 @@
+# DMs the user when a unit fails. The instance name is the failed unit, passed
+# by systemd as %n from OnFailure= on the units below.
+[Unit]
+Description=Report %i to Slack
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/opt/scout/app
+EnvironmentFile=/opt/scout/scout.env
+ExecStart=/opt/scout/venv/bin/python -m scout.alert %i

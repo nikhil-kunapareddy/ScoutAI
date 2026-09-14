@@ -1,0 +1,29 @@
+# One ScoutAI bot process, named by agent key: scout@bigtech, scout@university.
+# Each agent needs its own Slack app (its own bot token), so only run a second
+# instance once you have a second app's credentials.
+[Unit]
+Description=ScoutAI Slack bot (%i)
+After=network-online.target
+Wants=network-online.target
+# A failure here DMs the user. For the bot that means it exhausted its
+# restart burst, not that it restarted once.
+OnFailure=scout-alert@%n.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/scout/app
+# Host-local settings. These win over the rsynced .env because load_dotenv()
+# does not override variables already in the environment.
+EnvironmentFile=/opt/scout/scout.env
+Environment=AGENT=%i
+ExecStart=/opt/scout/venv/bin/python run.py
+# Socket Mode holds a websocket; SIGTERM closes it through the app's own
+# shutdown handler (install_shutdown_handler in scout/slack/bot.py).
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

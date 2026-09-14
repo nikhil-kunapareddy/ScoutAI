@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the ScoutAI job digest daily
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+# Fire on the next boot if the box was asleep at 08:00.
+Persistent=true
+# Spread load off the exact minute; job boards do not need a thundering herd.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

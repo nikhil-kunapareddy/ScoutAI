@@ -27,6 +27,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back if unset or invalid."""
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
 # --- Active agent ---
 # Which agent this process runs; see scout/agents/. One process per agent.
 ACTIVE_AGENT = os.environ.get("AGENT", "bigtech")
@@ -67,6 +75,30 @@ FALLBACK_BACKEND = os.environ.get("FALLBACK_BACKEND", "ollama")
 MAX_TURNS = _env_int("MAX_TURNS", 20)         # message pairs retained per user
 MAX_TOOL_HOPS = _env_int("MAX_TOOL_HOPS", 5)  # tool round-trips per message
 
+# --- Conversation state ---
+# Where LangGraph checkpoints live. Empty (the default) keeps history in memory,
+# so a restart is a clean slate and the tests need no files. Set it to a path —
+# absolute, or relative to the project root — and history plus the parsed resume
+# profile survive restarts, which is what a deployed bot wants. See
+# scout/core/checkpoints.py.
+CHECKPOINT_DB = os.environ.get("CHECKPOINT_DB", "")
+
+# --- Daily digest ---
+# Slack user id the scheduled digest DMs (e.g. U012ABCDEF) — yours, not the
+# bot's. Found under your Slack profile, "Copy member ID".
+DIGEST_SLACK_USER = os.environ.get("DIGEST_SLACK_USER", "")
+# How many roles to ask each agent for. Each agent contributes its own section,
+# so the message holds this many per agent, not in total.
+DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 5)
+
+# --- Turn metrics ---
+# Dollars per million tokens, used to price each turn in the metrics line. Left
+# at 0 the line reports tokens only — rates differ per backend and change over
+# time, so they are configuration rather than a table baked into the code. Fill
+# them from your provider's pricing page to get a usd= field.
+USD_PER_MTOK_IN = _env_float("USD_PER_MTOK_IN", 0.0)
+USD_PER_MTOK_OUT = _env_float("USD_PER_MTOK_OUT", 0.0)
+
 # --- Logging ---
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = _env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
@@ -101,4 +133,27 @@ def require_slack_credentials() -> None:
             f"Missing required setting(s): {', '.join(missing)}.\n"
             "Copy .env.example to .env and fill in your Slack tokens "
             "(see the 'One-time Slack setup' section of the README)."
+        )
+
+
+def require_digest_config() -> None:
+    """Fail readably when the digest has no bot token or nobody to send to.
+
+    Separate from ``require_slack_credentials`` because the two entry points need
+    different things: the digest posts over the Web API and never opens a socket,
+    so it wants ``SLACK_BOT_TOKEN`` but not ``SLACK_APP_TOKEN``.
+    """
+    missing = [
+        name
+        for name, value in (
+            ("SLACK_BOT_TOKEN", SLACK_BOT_TOKEN),
+            ("DIGEST_SLACK_USER", DIGEST_SLACK_USER),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(
+            f"Missing required setting(s): {', '.join(missing)}.\n"
+            "The digest needs a bot token and the Slack user id to DM; see the "
+            "'Daily digest' section of the README."
         )

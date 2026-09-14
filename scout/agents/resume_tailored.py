@@ -24,7 +24,6 @@ import logging
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from ..core.agent import (
@@ -34,6 +33,7 @@ from ..core.agent import (
     agent_tools,
     build_agent_graph,
 )
+from ..core.checkpoints import build_checkpointer
 from .resume_parser import SPEC as RESUME_SPEC
 from .resume_parser import parse_profile
 
@@ -54,13 +54,13 @@ class ResumeTailoredAgent(GraphRunner):
     _min_steps = 2
 
     def __init__(self, job_spec: AgentSpec) -> None:
-        self._parser_checkpointer = InMemorySaver()
+        self._parser_checkpointer = build_checkpointer()
         self._parser = build_agent_graph(RESUME_SPEC, agent_tools(RESUME_SPEC)).compile(
             checkpointer=self._parser_checkpointer
         )
 
         job_tools = agent_tools(job_spec)
-        checkpointer = InMemorySaver()
+        checkpointer = build_checkpointer()
         builder = StateGraph(AgentState)
         builder.add_node("parse_resume", self._parse_resume)
         # Compiled with no checkpointer of its own: as a subgraph it inherits

@@ -102,3 +102,4 @@ coverage.xml
 .Trashes
 Thumbs.db
 desktop.ini
+deploy/host

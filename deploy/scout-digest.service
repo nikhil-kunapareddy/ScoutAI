@@ -1,0 +1,19 @@
+# One-shot daily digest: runs every job agent and DMs a merged report.
+[Unit]
+Description=ScoutAI daily job digest
+After=network-online.target
+Wants=network-online.target
+# A failure here DMs the user. For the bot that means it exhausted its
+# restart burst, not that it restarted once.
+OnFailure=scout-alert@%n.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/opt/scout/app
+EnvironmentFile=/opt/scout/scout.env
+# A digest sweeps every source in one turn, so it needs more hops than a
+# chat reply. Set here rather than in scout.env so the bot keeps its own
+# tighter limit.
+Environment=MAX_TOOL_HOPS=8
+ExecStart=/opt/scout/venv/bin/python -m scout.digest

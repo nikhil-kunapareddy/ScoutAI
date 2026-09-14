@@ -18,9 +18,15 @@ python run.py                     # BigTech Agent (default)
 AGENT=university python run.py    # University Agent
 AGENT=resume python run.py        # Resume Parser alone, for debugging
 
-pytest                            # 168 tests, no network or credentials needed
+python -m scout.digest            # run every job agent, DM one merged report
+python -m scout.stats --days 7    # read the turn metrics back
+
+pytest                            # 205 tests, no network or credentials needed
 ruff check .
 ```
+
+Deployed on an EC2 `t4g.micro` under systemd; `./deploy/deploy.sh` ships the
+working tree and restarts. See the AWS section of the README.
 
 ## Layout
 
@@ -34,6 +40,11 @@ ruff check .
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
+| `scout/slack/notify.py` | Opening a DM nobody asked for (digest, alerts) |
+| `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
+| `scout/core/metrics.py` | The one-line-per-turn record |
+| `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
+| `deploy/` | `deploy.sh` plus the systemd units the box runs |
 
 ## The two graphs
 
@@ -70,6 +81,9 @@ Three seams hold the layers apart — keep them intact:
 - **Adding an agent:** one file in `scout/agents/` defining `SPEC = AgentSpec(...)`,
   registered in `AGENTS` in `scout/agents/__init__.py`. Omit `default_backend` to
   inherit `settings.DEFAULT_BACKEND`. Never edit the graph to add an agent.
+- **The digest derives its agents**, it does not list them: `tailor_with_resume`
+  is the marker, so a new job agent joins the digest by existing. Don't add a
+  registry beside `AGENTS`.
 - **Adding a tool:** a module with `register(reg: ToolRegistry)` defining `@reg.tool`
   functions, then add the module to the relevant spec's `tool_modules`. The
   signature and Google-style `Args:` block *are* the schema LangChain derives and
@@ -110,8 +124,12 @@ Three seams hold the layers apart — keep them intact:
   container has no Ollama).
 - **Per-user locks stay.** slack-bolt dispatches on a thread pool; one lock per
   user serializes their turns while other users run concurrently.
-- **State is in memory** (`InMemorySaver`). Swapping in a persistent checkpointer
-  is a one-line change, but it is a real design change, not a tweak.
+- **State is in memory unless `CHECKPOINT_DB` says otherwise** — see
+  `core/checkpoints.py`. Empty means `InMemorySaver`, which is what tests and
+  local runs get. A path means SQLite (WAL, `check_same_thread=False`, because
+  slack-bolt is threaded), and then history *and* the cached resume profile
+  outlive the process. The deployed bot sets it, so a changed resume needs
+  `--reset` to take effect.
 - The bot answers DMs only (`channel_type == "im"`), ignoring channels, bots, and
   edits.
 

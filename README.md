@@ -228,23 +228,49 @@ Cloud Run is the other option, but a Cloud Run *service* must listen on `$PORT`,
 which a Socket Mode worker doesn't do — use a Cloud Run **worker pool** (built
 for exactly this) if it's available in your project, or stay on GCE.
 
-### AWS
+### AWS (what this repo is deployed on)
 
-**ECS Fargate** with `desiredCount: 1` is the standard always-on container
-(~$6/month at 0.25 vCPU / 0.5 GB). No load balancer or target group is needed,
-since nothing connects inbound — which also means no public IP and no security
-group ingress. Pull secrets in the task definition:
+A single **`t4g.micro`** running the bot under systemd. Graviton/arm64, Amazon
+Linux 2023, no inbound ports except SSH from one address, no load balancer —
+Socket Mode dials out, so nothing connects in.
 
-```json
-"secrets": [
-  {"name": "SLACK_BOT_TOKEN", "valueFrom": "arn:aws:ssm:...:parameter/scout/SLACK_BOT_TOKEN"},
-  {"name": "SLACK_APP_TOKEN", "valueFrom": "arn:aws:ssm:...:parameter/scout/SLACK_APP_TOKEN"},
-  {"name": "ANTHROPIC_API_KEY", "valueFrom": "arn:aws:ssm:...:parameter/scout/ANTHROPIC_API_KEY"}
-]
+Roughly **$10.40/month**: $6.13 instance + $3.60 public IPv4 + $0.64 for an 8 GB
+gp3 volume. The IPv4 charge is unavoidable on any instance that needs both SSH
+and outbound internet; the alternatives (NAT gateway, VPC endpoints) cost several
+times more. Your model bill will dwarf all of it.
+
+`deploy/` holds everything:
+
+| File | Purpose |
+|------|---------|
+| `deploy.sh` | rsync the working tree, install deps, refresh units, restart |
+| `scout@.service` | the bot, one instance per agent (`scout@bigtech`) |
+| `scout-digest.service` / `.timer` | the daily digest, 08:00 local |
+| `scout-alert@.service` | DMs you when a unit fails |
+
+```bash
+./deploy/deploy.sh          # host comes from deploy/host or $SCOUT_HOST
 ```
 
-A `t4g.nano` EC2 instance or a Lightsail container runs it for ~$3–5/month if
-you'd rather not deal with ECS.
+Deliberately rsync rather than `git pull`: `.env` and `data/` are git-ignored but
+are exactly what the host needs, so one copy covers code, resume, and secrets.
+Host-only settings live in `/opt/scout/scout.env`, which is never overwritten —
+that is where `CHECKPOINT_DB` and an empty `FALLBACK_BACKEND` are set, and they
+win over the copied `.env` because `load_dotenv()` leaves existing environment
+variables alone.
+
+Two things worth knowing:
+
+- **One Slack app means one bot.** Two `scout@` instances sharing a bot token
+  would both answer every DM. Running the University Agent interactively as well
+  needs a second Slack app; the digest does not, because it runs every agent
+  in-process and posts through a single token.
+- **No IAM role on the instance.** Nothing is pushed to CloudWatch — alerting
+  goes to Slack instead. Attach an instance profile if you want CloudWatch Logs;
+  the metrics line is already shaped for Logs Insights.
+
+Fargate, Lightsail, or an EC2 instance elsewhere all run the same `Dockerfile` if
+you would rather not manage a box.
 
 ### Running it on your Mac instead
 
@@ -271,6 +297,56 @@ needs three changes, none of which exist yet:
    LangGraph makes this the smallest of the three changes: swap `InMemorySaver`
    for a durable checkpointer (`langgraph-checkpoint-sqlite` or `-postgres`) in
    `Agent` and `ResumeTailoredAgent`.
+
+## Daily digest
+
+```bash
+python -m scout.digest
+```
+
+Runs every job agent, then DMs you one merged report. Which agents run is
+derived, not listed: any spec with `tailor_with_resume` counts, so a new agent in
+`AGENTS` joins tomorrow's digest without touching `scout/digest.py`.
+
+Each agent runs on its own thread (`digest:<key>`), kept apart from the threads
+the Slack bot uses. So the digest never eats into your chat history's `MAX_TURNS`
+window, and — given `CHECKPOINT_DB` — each agent can see what it sent on previous
+days and skip repeats. That thread memory is the only dedupe available: agents
+return prose, not the structured `JobPosting` objects their tools built.
+
+Needs `DIGEST_SLACK_USER` (your member id) and `SLACK_BOT_TOKEN`. It posts over
+the Web API and never opens a socket, so no `SLACK_APP_TOKEN`. On the box a
+systemd timer fires it at 08:00 local with `MAX_TOOL_HOPS` raised to 8, since one
+digest turn sweeps every source.
+
+## Monitoring
+
+Every turn writes one line, from `GraphRunner.respond` — the single place that
+sees a whole turn:
+
+```
+turn agent="BigTech Agent" thread=U0B8… backend=anthropic answered_by=anthropic \
+  outcome=ok seconds=12.4 model_calls=3 tool_calls=4 in_tokens=8123 out_tokens=512
+```
+
+`outcome` is `ok`, `stuck` (ran out of tool hops), or `error`. `answered_by`
+differs from `backend` exactly when the fallback rescued the turn. Set
+`USD_PER_MTOK_IN`/`OUT` to get a `usd=` field too — the rates are configuration,
+not a table baked into the code, because they change and a stale number is worse
+than none.
+
+Read them back with:
+
+```bash
+python -m scout.stats --days 7           # on the box, from journald
+journalctl -u 'scout@*' -o cat | python -m scout.stats -
+```
+
+Failures DM you, via systemd `OnFailure=`. Note what that does and does not
+catch: `Restart=always` makes a single crash silent and automatic, so an alert
+means the unit exhausted its restart burst. A bot that is running but has quietly
+lost its websocket still looks healthy — the daily digest is the backstop, since
+its absence is visible.
 
 ## Development
 
@@ -318,11 +394,14 @@ For a new job source, add a module under `scout/tools/jobs/`; the package's
 
 ## Operational notes
 
-- Conversation history is per-user and in memory: one LangGraph `InMemorySaver`
-  thread per Slack user, windowed to the last `MAX_TURNS` messages. Tool calls
-  and their results are kept in that history too, so they count toward the
-  window. `--reset` deletes the thread, and a restart clears everything; there is
-  no persistence.
+- Conversation history is per-user: one LangGraph checkpointer thread per Slack
+  user, windowed to the last `MAX_TURNS` messages. Tool calls and their results
+  are kept in that history too, so they count toward the window. `--reset`
+  deletes the thread. Whether a restart clears everything depends on
+  `CHECKPOINT_DB`: unset, state is in memory and a restart is a clean slate; set,
+  it is SQLite and both history and the parsed resume profile survive. The
+  deployed bot sets it, so the resume is parsed once rather than once per restart
+  — which also means a *new* resume needs a `--reset` to be picked up.
 - The bot only responds in DMs (`channel_type == "im"`); it ignores channels,
   other bots, and message edits.
 - Long replies are split across several Slack messages on line boundaries, so
