@@ -86,7 +86,7 @@ Three seams keep the layers apart:
 |------|---------|
 | `run.py` | Entry point — runs the agent named by `AGENT` (default `bigtech`) |
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and the `GraphRunner` runtime |
-| `scout/core/settings.py` | Shared config from `.env` (tokens, models, limits, timeouts) |
+| `scout/core/settings.py` | Shared config from `.env` + `.env.<agent>` (tokens, models, limits, timeouts) |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/core/paths.py` | Filesystem paths (no env dependencies) |
 | `scout/core/models.py` | One LangChain chat model per backend (Claude, Ollama, Llama API) |
@@ -287,8 +287,8 @@ times more. Your model bill will dwarf all of it.
 
 | File | Purpose |
 |------|---------|
-| `deploy.sh` | rsync the working tree, install deps, refresh units, restart |
-| `scout@.service` | the bot, one instance per agent (`scout@bigtech`) |
+| `deploy.sh` | rsync the working tree, install deps, refresh units, restart every enabled instance |
+| `scout@.service` | the bot, one instance per agent (`scout@bigtech`, `scout@edu`) |
 | `scout-digest.service` / `.timer` | the daily digest, 08:00 local |
 | `scout-alert@.service` | DMs you when a unit fails |
 
