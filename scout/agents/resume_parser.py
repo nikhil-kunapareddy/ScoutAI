@@ -2,7 +2,7 @@
 
 The producer half of a two-step pipeline, wired up in ``resume_tailored.py``:
 
-    resume_parser  ──CandidateProfile──▶  job agent (bigtech, university, …)
+    resume_parser  ──CandidateProfile──▶  job agent (bigtech, edu, …)
 
 It defines no tools of its own — it reuses ``get_resume_profile`` to read the
 file, and the model distils that text into the fields below. ``parse_profile``

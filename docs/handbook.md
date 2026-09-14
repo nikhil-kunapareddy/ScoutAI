@@ -15,7 +15,7 @@ Two job-search agents ship with it, both tailored to your resume:
 | Agent | `AGENT=` | What it searches |
 |-------|----------|------------------|
 | **BigTech Agent** (default) | `bigtech` | Amazon, Google, Netflix, and Greenhouse-hosted companies (Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood) |
-| **University Agent** | `university` | Northeastern University, Boston University |
+| **Edu Agent** | `edu` | Northeastern University, Boston University |
 | **Resume Parser** | `resume` | Nothing — the profile-extraction stage, runnable alone for debugging |
 
 Adding another agent is one small file — see [Adding an agent](#adding-an-agent).
@@ -101,7 +101,12 @@ Three seams keep the layers apart:
 
 ## One-time Slack setup
 
-1. https://api.slack.com/apps → **Create New App** → **From scratch**.
+Once per agent — each one is its own Slack app, which is what gives it its own
+DM window. Set the bot's **display name** to the agent's name, or two windows in
+your sidebar look identical.
+
+1. https://api.slack.com/apps → **Create New App** → **Blank app** (Slack's older
+   label for this was *From scratch*).
 2. **Socket Mode** → toggle on → generate an **App-Level Token** with scope
    `connections:write`. Save the `xapp-...` token.
 3. **OAuth & Permissions** → add Bot Token Scopes: `chat:write`, `im:history`,
@@ -111,14 +116,50 @@ Three seams keep the layers apart:
    commands and messages from the messages tab* (this is what lets you DM the bot).
 6. **Install App** → copy the **Bot User OAuth Token** (`xoxb-...`).
 
+Steps 1 and 3–5 can be done in one paste with **From a manifest** instead:
+
+```yaml
+display_information:
+  name: Edu Agent
+features:
+  bot_user: { display_name: Edu Agent, always_online: true }
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+oauth_config:
+  scopes:
+    bot: [chat:write, im:history, im:read, im:write]
+settings:
+  event_subscriptions:
+    bot_events: [message.im]
+  socket_mode_enabled: true
+```
+
+The app-level token (step 2) and the install (step 6) still have to be done by
+hand. Put the resulting pair in `.env.<agent>` — see [Local setup](#local-setup).
+
 ## Local setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # then paste your Slack tokens into .env
+cp .env.example .env
 ```
+
+Settings come from two files. `.env` holds what every agent shares; each agent's
+Slack token pair goes in its own `.env.<agent>`, because the two apps' tokens
+cannot sit side by side under the same names:
+
+```bash
+# .env.edu — likewise .env.bigtech
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+```
+
+The per-agent file wins over `.env`, and a real environment variable beats both,
+so `AGENT=edu SLACK_BOT_TOKEN=... python run.py` overrides either. Both files are
+git-ignored. Running a single agent? Leaving the tokens in `.env` still works.
 
 Add your Anthropic API key to `.env` — this is the default backend:
 
@@ -141,7 +182,7 @@ the most recently modified file there.
 
 ```bash
 python run.py                     # BigTech Agent (default)
-AGENT=university python run.py    # University Agent
+AGENT=edu python run.py           # Edu Agent
 ```
 
 Then just DM the bot in plain language — it routes through the model with all
@@ -262,12 +303,31 @@ that is where `CHECKPOINT_DB` and an empty `FALLBACK_BACKEND` are set, and they
 win over the copied `.env` because `load_dotenv()` leaves existing environment
 variables alone.
 
+`scout@.service` reads a second, per-instance file on top of it,
+`/opt/scout/scout-<agent>.env`, which is optional (the leading `-`) and wins on a
+duplicate key. That is where an agent's own Slack token pair goes:
+
+```bash
+# /opt/scout/scout-edu.env
+SLACK_BOT_TOKEN=xoxb-…
+SLACK_APP_TOKEN=xapp-…
+CHECKPOINT_DB=/opt/scout/state/edu.sqlite
+```
+
+```bash
+sudo systemctl enable --now scout@edu
+```
+
 Two things worth knowing:
 
 - **One Slack app means one bot.** Two `scout@` instances sharing a bot token
-  would both answer every DM. Running the University Agent interactively as well
-  needs a second Slack app; the digest does not, because it runs every agent
-  in-process and posts through a single token.
+  would both answer every DM, which is what the per-instance file above avoids:
+  each agent gets the credentials of its own Slack app. The digest needs no
+  second app, because it runs every agent in-process and posts through a single
+  token.
+- **Give each instance its own `CHECKPOINT_DB`.** Thread ids are the bare Slack
+  user id, so two bots sharing one database would interleave your conversations
+  into a single history thread.
 - **No IAM role on the instance.** Nothing is pushed to CloudWatch — alerting
   goes to Slack instead. Attach an instance profile if you want CloudWatch Logs;
   the metrics line is already shaped for Logs Insights.

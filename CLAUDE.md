@@ -16,13 +16,13 @@ source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 
 python run.py                     # BigTech Agent (default)
-AGENT=university python run.py    # University Agent
+AGENT=edu python run.py           # Edu Agent
 AGENT=resume python run.py        # Resume Parser alone, for debugging
 
 python -m scout.digest            # run every job agent, DM one merged report
 python -m scout.stats --days 7    # read the turn metrics back
 
-pytest                            # 205 tests, no network or credentials needed
+pytest                            # 210 tests, no network or credentials needed
 ruff check .
 ```
 
@@ -36,7 +36,7 @@ working tree and restarts. See the AWS section of docs/handbook.md.
 | `run.py` | Entry point: resolves `AGENT`, checks Slack creds, starts the bot |
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and `GraphRunner` |
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
-| `scout/core/settings.py` | All shared config, read once from `.env` |
+| `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`) |
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
@@ -99,6 +99,9 @@ Three seams hold the layers apart — keep them intact:
   problem — see below.
 - **Config goes in `settings.py`**, not scattered `os.environ` reads. Nothing there
   raises on import — that's what keeps the package importable without a `.env`.
+- **Anything that can't be shared between agents goes in `.env.<agent>`**, which
+  layers over `.env`. Today that's the Slack token pair (one app per agent) and
+  `CHECKPOINT_DB`. Shared keys stay in `.env` — don't copy them per agent.
 - Ruff, `line-length = 100`, py310 target.
 
 ## Invariants worth not breaking
@@ -132,6 +135,11 @@ Three seams hold the layers apart — keep them intact:
   slack-bolt is threaded), and then history *and* the cached resume profile
   outlive the process. The deployed bot sets it, so a changed resume needs
   `--reset` to take effect.
+- **Two bots on one `CHECKPOINT_DB` share a thread.** Thread ids are the bare
+  Slack user id (`_config` in `core/agent.py`), not namespaced by agent, so each
+  interactive agent needs its own DB path in its `.env.<agent>` — otherwise your
+  conversations with the two bots interleave into one history. The digest is
+  already safe: it uses `digest:<key>`.
 - The bot answers DMs only (`channel_type == "im"`), ignoring channels, bots, and
   edits.
 

@@ -26,12 +26,12 @@ def test_unrelated_lines_are_skipped() -> None:
 
 
 def test_totals_add_up_per_agent() -> None:
-    other = LINE.replace("BigTech Agent", "University Agent")
+    other = LINE.replace("BigTech Agent", "Edu Agent")
     totals = summarise([LINE, LINE, other])
     assert totals["BigTech Agent"].turns == 2
     assert totals["BigTech Agent"].in_tokens == 8123 * 2
     assert round(totals["BigTech Agent"].usd, 4) == 0.32
-    assert totals["University Agent"].turns == 1
+    assert totals["Edu Agent"].turns == 1
 
 
 def test_failures_are_counted_apart_from_successes() -> None:
@@ -52,9 +52,9 @@ def test_empty_window_says_so() -> None:
 
 
 def test_table_has_a_row_per_agent() -> None:
-    table = render(summarise([LINE, LINE.replace("BigTech", "University")]))
+    table = render(summarise([LINE, LINE.replace("BigTech", "Edu")]))
     assert "BigTech Agent" in table
-    assert "University Agent" in table
+    assert "Edu Agent" in table
 
 
 def test_alert_refuses_without_somewhere_to_send(monkeypatch) -> None:

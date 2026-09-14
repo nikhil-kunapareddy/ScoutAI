@@ -1,7 +1,9 @@
-"""Platform configuration, loaded once from the project ``.env``.
+"""Platform configuration, loaded once from ``.env`` and ``.env.<agent>``.
 
 Agent-specific settings (system prompt, tool set, default backend) live on each
-``AgentSpec`` in ``scout/agents/``; this module holds only what all agents share.
+``AgentSpec`` in ``scout/agents/``; this module holds only what all agents share
+— plus the one thing that cannot be shared, the Slack token pair, which comes
+from the per-agent file because each agent is a separate Slack app.
 
 Nothing here raises on import — a missing credential leaves an empty string, so
 the package stays importable (and testable) without a ``.env``. Credentials are
@@ -12,11 +14,25 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from .paths import PROJECT_ROOT
 
-load_dotenv(PROJECT_ROOT / ".env")
+_ENV = PROJECT_ROOT / ".env"
+
+# --- Active agent ---
+# Which agent this process runs; see scout/agents/. One process per agent.
+# Read before loading ``.env`` — it decides *which* token file layers on top —
+# so peek at the file with dotenv_values rather than mutating the environment.
+ACTIVE_AGENT = os.environ.get("AGENT") or dotenv_values(_ENV).get("AGENT") or "bigtech"
+
+# Each agent is its own Slack app, so each needs its own bot and app token.
+# ``.env.<agent>`` holds that pair; ``.env`` holds everything the agents share.
+# load_dotenv never overrides a key that is already set, so first file to define
+# one wins: real environment > .env.<agent> > .env. That ordering is what keeps
+# the deployed EnvironmentFile authoritative over the rsynced .env.
+load_dotenv(PROJECT_ROOT / f".env.{ACTIVE_AGENT}")
+load_dotenv(_ENV)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -34,10 +50,6 @@ def _env_float(name: str, default: float) -> float:
     except (KeyError, ValueError):
         return default
 
-
-# --- Active agent ---
-# Which agent this process runs; see scout/agents/. One process per agent.
-ACTIVE_AGENT = os.environ.get("AGENT", "bigtech")
 
 # --- Slack ---
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")

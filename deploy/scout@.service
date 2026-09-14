@@ -1,4 +1,4 @@
-# One ScoutAI bot process, named by agent key: scout@bigtech, scout@university.
+# One ScoutAI bot process, named by agent key: scout@bigtech, scout@edu.
 # Each agent needs its own Slack app (its own bot token), so only run a second
 # instance once you have a second app's credentials.
 [Unit]
@@ -15,7 +15,16 @@ User=ec2-user
 WorkingDirectory=/opt/scout/app
 # Host-local settings. These win over the rsynced .env because load_dotenv()
 # does not override variables already in the environment.
+#
+# Two files, and the second is what lets two agents run side by side: the shared
+# one holds the API keys and limits, the per-instance one holds this agent's
+# Slack token pair (and its own CHECKPOINT_DB, so the two bots do not share a
+# history thread — thread ids are the Slack user id, not namespaced by agent).
+# systemd reads them in order and the later file wins on a duplicate key.
+# The dash means a missing per-instance file is not an error, so an instance
+# with everything in scout.env still starts.
 EnvironmentFile=/opt/scout/scout.env
+EnvironmentFile=-/opt/scout/scout-%i.env
 Environment=AGENT=%i
 ExecStart=/opt/scout/venv/bin/python run.py
 # Socket Mode holds a websocket; SIGTERM closes it through the app's own
