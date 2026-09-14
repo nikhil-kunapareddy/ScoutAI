@@ -9,3 +9,6 @@ python-dotenv>=1.0.0
 pypdf>=4.0.0
 docx2txt>=0.8
 langgraph-checkpoint-sqlite>=2.0.0
+# Tracing. Pulled in by langchain-core anyway; named here because the
+# deployment turns it on with LANGSMITH_TRACING.
+langsmith>=0.12.0

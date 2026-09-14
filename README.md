@@ -342,6 +342,28 @@ python -m scout.stats --days 7           # on the box, from journald
 journalctl -u 'scout@*' -o cat | python -m scout.stats -
 ```
 
+### LangSmith
+
+For the full picture of a turn — every node, model call, and tool call, with the
+prompts and tool output attached — set these and restart. No code change;
+LangGraph instruments itself:
+
+```
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_pt_...
+LANGSMITH_PROJECT=scout
+```
+
+It complements the `turn` line rather than replacing it: the log line is the
+cheap always-on record, LangSmith is what you open when a digest returns
+something odd and you want to see which tool returned what.
+
+Be aware it sends prompts and completions off the box, résumé profile included.
+`LANGSMITH_HIDE_INPUTS=true` and `LANGSMITH_HIDE_OUTPUTS=true` keep the call
+tree, latency, and token counts while leaving the content behind. Tracing is
+best-effort and batched in the background, so an unreachable LangSmith slows
+nothing and fails no turns.
+
 Failures DM you, via systemd `OnFailure=`. Note what that does and does not
 catch: `Restart=always` makes a single crash silent and automatic, so an alert
 means the unit exhausted its restart burst. A bot that is running but has quietly
