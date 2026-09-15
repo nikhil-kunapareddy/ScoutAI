@@ -41,7 +41,7 @@ dependencies = [
     "langchain-openai>=1.0.0",
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
-    "pypdf>=4.0.0",
+    "pypdf>=6.18.1",
     "docx2txt>=0.8",
     # Tracing. Pulled in by langchain-core anyway; named here because the
     # deployment turns it on with LANGSMITH_TRACING.
