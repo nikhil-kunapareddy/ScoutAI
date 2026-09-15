@@ -43,7 +43,7 @@ def test_non_ai_ml_titles(title: str) -> None:
     assert not is_ai_ml_role(title)
 
 
-@pytest.mark.parametrize("value,expected", [
+@pytest.mark.parametrize(("value", "expected"), [
     (5, 5),
     ("7", 7),          # models often send numbers as strings
     (0, 1),            # below the floor

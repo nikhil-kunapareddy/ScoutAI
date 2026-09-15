@@ -19,11 +19,9 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from ..core import settings
 from ..core.agent import ConversationalAgent
 from ..core.logging_config import quiet_third_party_loggers
+from .formatting import split_message
 
 log = logging.getLogger("scout")
-
-#: Slack collapses very long messages, so replies are split below this.
-MAX_MESSAGE_CHARS = 3500
 
 #: Cap on exception text echoed to the user, so a huge provider error doesn't
 #: become the whole reply.
@@ -149,7 +147,7 @@ class SlackBot:
         if reply is None:
             reply = self._answer(user, text)
 
-        for chunk in _split_message(reply):
+        for chunk in split_message(reply):
             say(chunk)
 
     def _answer(self, user: str, text: str) -> str:
@@ -212,26 +210,3 @@ def install_shutdown_handler() -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, shut_down)
-
-
-def _split_message(text: str, limit: int = MAX_MESSAGE_CHARS) -> list[str]:
-    """Split ``text`` into Slack-sized chunks on line boundaries.
-
-    A single line longer than ``limit`` is emitted whole: job listings put each
-    link on its own line, and a hard split would break the link.
-    """
-    if len(text) <= limit:
-        return [text]
-
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines():
-        candidate = f"{current}\n{line}" if current else line
-        if current and len(candidate) > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks

@@ -13,7 +13,7 @@ import logging
 from slack_sdk import WebClient
 
 from ..core import settings
-from .bot import _split_message
+from .formatting import split_message
 
 log = logging.getLogger("scout")
 
@@ -27,7 +27,7 @@ def post_dm(user_id: str, text: str) -> None:
         text: The message body.
     """
     client = WebClient(token=settings.SLACK_BOT_TOKEN)
-    chunks = _split_message(text)
+    chunks = split_message(text)
     for chunk in chunks:
         client.chat_postMessage(channel=user_id, text=chunk)
     log.info("Posted %d message(s) to %s", len(chunks), user_id)

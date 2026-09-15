@@ -52,11 +52,29 @@ def clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
     Small models routinely pass ``limit="ten"`` or ``days=0``, and a tool that
     raises on junk input wastes a whole turn.
     """
-    try:
-        number = int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        number = default
+    number = default
+    if isinstance(value, int | float | str):
+        try:
+            number = int(value)
+        except ValueError:  # "ten", "", "1.2.3"
+            number = default
     return min(max(number, minimum), maximum)
+
+
+def json_rows(payload: object, key: str) -> list[dict]:
+    """The rows under ``key`` in a decoded JSON body, or [] if it isn't shaped
+    that way.
+
+    ``response.json()`` is whatever the source sent, and a board under load
+    answers with an error document often enough to be worth expecting: checking
+    the shape here is what keeps every source's parser working on rows only.
+    """
+    if not isinstance(payload, dict):
+        return []
+    found = payload.get(key)
+    if not isinstance(found, list):
+        return []
+    return [row for row in found if isinstance(row, dict)]
 
 
 def search_queries(keywords: str) -> tuple[str, ...]:

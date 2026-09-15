@@ -74,7 +74,8 @@ def test_remove_is_case_insensitive_and_returns_what_it_dropped() -> None:
 
     dropped = referrals.remove("u", "STRIPE")
 
-    assert dropped is not None and dropped.company == "Stripe"
+    assert dropped is not None
+    assert dropped.company == "Stripe"
     assert [r.company for r in referrals.list_for("u")] == ["Databricks"]
 
 

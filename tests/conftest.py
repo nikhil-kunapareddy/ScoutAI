@@ -23,6 +23,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from scout.core import models as models_module
 from scout.core import settings
 from scout.core.agent import AgentSpec
+from scout.tools import build_registry
 
 
 class ScriptedModel(BaseChatModel):
@@ -108,7 +109,7 @@ def echo_tool_module():
 
     class Module:
         @staticmethod
-        def register(reg):
+        def register(reg) -> None:
             @reg.tool
             def echo(text: str = "") -> str:
                 """Echo back the given text.
@@ -135,3 +136,45 @@ def spec(echo_tool_module) -> AgentSpec:
         tool_modules=[echo_tool_module],
         default_backend="primary",
     )
+
+
+# --- Stubbed HTTP, for the tools that fetch ---------------------------------
+
+
+class FakeResponse:
+    def __init__(self, json_data: dict | None = None, text: str = "") -> None:
+        self._json = json_data or {}
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._json
+
+
+class FakeRequests:
+    """A stand-in for the ``requests`` module, recording every call."""
+
+    def __init__(self, response: FakeResponse | None = None,
+                 error: Exception | None = None) -> None:
+        self.response = response or FakeResponse()
+        self.error = error
+        self.calls: list[dict] = []
+
+    def _handle(self, url: str, **kwargs) -> FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        if self.error:
+            raise self.error
+        return self.response
+
+    get = _handle
+    post = _handle
+
+
+def call_tool(module, tool_name: str, fake: FakeRequests, monkeypatch, **args) -> str:
+    """Register ``module``'s tools against a stubbed ``requests`` and call one."""
+    monkeypatch.setattr(module, "requests", fake)
+    registry = build_registry([module])
+    tool = next(t for t in registry.tools if t.name == tool_name)
+    return tool.invoke(args)

@@ -23,6 +23,7 @@ from . import (
     JobPosting,
     clamp_int,
     is_ai_ml_role,
+    json_rows,
     matches_keywords,
     render_postings,
     take_newest,
@@ -108,7 +109,7 @@ def _fetch_board(slug: str) -> list[dict] | None:
             timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return resp.json().get("jobs", [])
+        return json_rows(resp.json(), "jobs")
     except Exception:
         return None
 

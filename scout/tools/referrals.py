@@ -18,7 +18,9 @@ from .registry import ToolRegistry
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def add_referral(company: str, contact: str = "", note: str = "",
+    # No Args: entry for `config`: LangChain injects it and keeps it out of the
+    # schema, so documenting it would describe a parameter the model never sees.
+    def add_referral(company: str, contact: str = "", note: str = "",  # noqa: D417
                      *, config: RunnableConfig) -> str:
         """Record a company where the user has a referral connection.
 
@@ -40,7 +42,8 @@ def register(reg: ToolRegistry) -> None:
         return f"{verb} {referral.render()}"
 
     @reg.tool
-    def remove_referral(company: str, *, config: RunnableConfig) -> str:
+    # As above: `config` is injected, so it is not in the documented Args.
+    def remove_referral(company: str, *, config: RunnableConfig) -> str:  # noqa: D417
         """Remove a company from the user's referral list.
 
         Args:

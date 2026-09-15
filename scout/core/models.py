@@ -152,9 +152,10 @@ def with_tools(
     Order matters: ``bind_tools`` discards kwargs bound before it, so the
     provider options have to go on last or they are silently dropped.
     """
-    bound: Runnable[LanguageModelInput, BaseMessage] = build(name)
-    if tools:
-        bound = bound.bind_tools(tools)
+    model = build(name)
+    bound: Runnable[LanguageModelInput, BaseMessage] = (
+        model.bind_tools(tools) if tools else model
+    )
     options = _REQUEST_OPTIONS.get(name)
     return bound.bind(**options()) if options else bound
 

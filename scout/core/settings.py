@@ -95,6 +95,13 @@ MAX_TOOL_HOPS = _env_int("MAX_TOOL_HOPS", 5)  # tool round-trips per message
 # scout/core/checkpoints.py.
 CHECKPOINT_DB = os.environ.get("CHECKPOINT_DB", "")
 
+# --- Resumes ---
+# Where the Resume Parser looks. A relative path is taken against the project
+# root, so a checkout needs no configuration; point it somewhere real if the
+# package is installed rather than run from a clone, because then the project
+# root is inside site-packages.
+RESUME_DIR = os.environ.get("RESUME_DIR", "data")
+
 # --- Referral list ---
 # Companies the user has a connection at. Unlike CHECKPOINT_DB this defaults to
 # a real path: history is disposable, but a list the user typed by hand should
@@ -151,7 +158,7 @@ def require_slack_credentials() -> None:
         raise SystemExit(
             f"Missing required setting(s): {', '.join(missing)}.\n"
             "Copy .env.example to .env and fill in your Slack tokens "
-            "(see the 'One-time Slack setup' section of docs/handbook.md)."
+            "(see docs/getting-started.md), then run `scout doctor`."
         )
 
 
@@ -173,6 +180,6 @@ def require_digest_config() -> None:
     if missing:
         raise SystemExit(
             f"Missing required setting(s): {', '.join(missing)}.\n"
-            "The digest needs a bot token and the Slack user id to DM; see the "
-            "'Daily digest' section of docs/handbook.md."
+            "The digest needs a bot token and the Slack user id to DM; see "
+            "the 'Daily digest' section of docs/operations.md."
         )

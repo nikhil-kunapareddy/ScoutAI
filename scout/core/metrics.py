@@ -125,8 +125,14 @@ def _added_this_turn(messages: list[BaseMessage]) -> list[BaseMessage]:
 
 
 def _usage(message: AIMessage, field: str) -> int:
-    """One usage figure, or 0 when the provider didn't report it."""
-    return (message.usage_metadata or {}).get(field, 0)
+    """One usage figure, or 0 when the provider didn't report it.
+
+    ``usage_metadata`` is a TypedDict with known keys, so it is widened to a
+    plain dict to be read by name — providers also vary in which keys they fill.
+    """
+    usage: dict[str, object] = dict(message.usage_metadata or {})
+    value = usage.get(field, 0)
+    return value if isinstance(value, int) else 0
 
 
 def record(metrics: TurnMetrics) -> None:

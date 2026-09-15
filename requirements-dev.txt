@@ -1,5 +1,11 @@
-# Development / CI dependencies (the runtime ones live in requirements.txt).
+# Generated from pyproject.toml — do not edit by hand.
+#   python scripts/sync_requirements.py
+#
+# Development and CI dependencies; the runtime ones come in via the -r line.
 -r requirements.txt
 
 pytest>=8.0.0
-ruff>=0.6.0
+pytest-cov>=5.0.0
+ruff==0.16.6
+mypy==2.3.1
+types-requests

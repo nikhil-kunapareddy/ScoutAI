@@ -18,6 +18,7 @@ from . import (
     JobPosting,
     clamp_int,
     is_ai_ml_role,
+    json_rows,
     render_postings,
     search_queries,
     take_newest,
@@ -65,16 +66,23 @@ def register(reg: ToolRegistry) -> None:
 def _fetch_positions(query: str) -> list[dict]:
     """Run one keyword search. Returns [] if Netflix is unreachable, so the
     remaining profile queries can still produce an answer."""
+    params: dict[str, str | int] = {
+        "domain": "netflix.com",
+        "query": query,
+        "location": "United States",
+        "sort_by": "timestamp",
+        "num": API_PAGE_SIZE,
+        "start": 0,
+    }
     try:
         resp = requests.get(
             SEARCH_URL,
-            params={"domain": "netflix.com", "query": query, "location": "United States",
-                    "sort_by": "timestamp", "num": API_PAGE_SIZE, "start": 0},
+            params=params,
             headers={"User-Agent": settings.TOOL_USER_AGENT, "Accept": "application/json"},
             timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return resp.json().get("positions", [])
+        return json_rows(resp.json(), "positions")
     except Exception:
         return []
 

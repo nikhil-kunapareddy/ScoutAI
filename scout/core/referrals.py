@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -171,4 +170,4 @@ def _write(data: dict[str, list[Referral]]) -> None:
     }
     tmp = path.with_suffix(f"{path.suffix}.tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    tmp.replace(path)

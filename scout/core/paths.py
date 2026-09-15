@@ -1,7 +1,9 @@
-"""
-Filesystem paths shared across the platform.
-Kept free of environment/config dependencies so any module can import it
-without triggering credential loading.
+"""Filesystem paths shared across the platform.
+
+Deliberately free of environment and configuration dependencies, so any module
+can import it without pulling in ``settings`` — and therefore without loading a
+``.env``. Anything a user can move lives in ``settings`` and is resolved through
+``under_root``.
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ from pathlib import Path
 
 # scout/core/paths.py -> parents[2] is the repository root.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data"
 LOG_DIR = PROJECT_ROOT / "logs"
 
 

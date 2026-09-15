@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from scout.tools import build_registry
 from scout.tools.jobs import (
     amazon,
     boston_university,
@@ -21,44 +20,7 @@ from scout.tools.jobs import (
     northeastern,
 )
 
-
-class FakeResponse:
-    def __init__(self, json_data: dict | None = None, text: str = "") -> None:
-        self._json = json_data or {}
-        self.text = text
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict:
-        return self._json
-
-
-class FakeRequests:
-    """A stand-in for the ``requests`` module, recording every call."""
-
-    def __init__(self, response: FakeResponse | None = None,
-                 error: Exception | None = None) -> None:
-        self.response = response or FakeResponse()
-        self.error = error
-        self.calls: list[dict] = []
-
-    def _handle(self, url: str, **kwargs) -> FakeResponse:
-        self.calls.append({"url": url, **kwargs})
-        if self.error:
-            raise self.error
-        return self.response
-
-    get = _handle
-    post = _handle
-
-
-def call(module, tool_name: str, fake: FakeRequests, monkeypatch, **args) -> str:
-    """Register ``module``'s tools against a stubbed ``requests`` and call one."""
-    monkeypatch.setattr(module, "requests", fake)
-    registry = build_registry([module])
-    tool = next(t for t in registry.tools if t.name == tool_name)
-    return tool.invoke(args)
+from .conftest import FakeRequests, FakeResponse, call_tool
 
 
 def days_ago(days: int) -> str:
@@ -84,7 +46,7 @@ AMAZON_ROWS = {
 
 def test_amazon_filters_and_formats(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(AMAZON_ROWS))
-    out = call(amazon, "search_amazon_jobs", fake, monkeypatch)
+    out = call_tool(amazon, "search_amazon_jobs", fake, monkeypatch)
 
     # Only the relevant, recent, non-intern role survives — and it is not
     # duplicated even though every profile query returned the same rows.
@@ -99,38 +61,38 @@ def test_amazon_filters_and_formats(monkeypatch) -> None:
 
 def test_amazon_widens_the_window_on_request(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(AMAZON_ROWS))
-    out = call(amazon, "search_amazon_jobs", fake, monkeypatch, days=30)
+    out = call_tool(amazon, "search_amazon_jobs", fake, monkeypatch, days=30)
     assert "last 30 days" in out
     assert "Applied Scientist" in out
 
 
 def test_amazon_runs_every_profile_query_by_default(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse({"jobs": []}))
-    call(amazon, "search_amazon_jobs", fake, monkeypatch)
+    call_tool(amazon, "search_amazon_jobs", fake, monkeypatch)
     assert len(fake.calls) == len(amazon.search_queries(""))
 
 
 def test_amazon_uses_explicit_keywords_only(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse({"jobs": []}))
-    call(amazon, "search_amazon_jobs", fake, monkeypatch, keywords="applied scientist")
+    call_tool(amazon, "search_amazon_jobs", fake, monkeypatch, keywords="applied scientist")
     assert len(fake.calls) == 1
     assert fake.calls[0]["params"]["base_query"] == "applied scientist"
 
 
 def test_amazon_reports_an_empty_window(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse({"jobs": []}))
-    out = call(amazon, "search_amazon_jobs", fake, monkeypatch)
+    out = call_tool(amazon, "search_amazon_jobs", fake, monkeypatch)
     assert "No relevant Amazon roles found in the last 24h" in out
 
 
 def test_amazon_survives_an_unreachable_api(monkeypatch) -> None:
     """A dead source must answer in words, not raise into the tool loop."""
     fake = FakeRequests(error=OSError("connection reset"))
-    out = call(amazon, "search_amazon_jobs", fake, monkeypatch)
+    out = call_tool(amazon, "search_amazon_jobs", fake, monkeypatch)
     assert "No relevant Amazon roles" in out
 
 
-@pytest.mark.parametrize("raw,expected", [
+@pytest.mark.parametrize(("raw", "expected"), [
     ("June 03, 2026", datetime(2026, 6, 3)),
     ("  June   03,  2026 ", datetime(2026, 6, 3)),  # odd spacing from the API
     ("2026-06-03", None),
@@ -153,7 +115,7 @@ GOOGLE_HTML = """
 
 def test_google_parses_listings_and_notes_the_missing_dates(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(text=GOOGLE_HTML))
-    out = call(google, "search_google_jobs", fake, monkeypatch)
+    out = call_tool(google, "search_google_jobs", fake, monkeypatch)
 
     assert "*Machine Learning Engineer, Search*" in out
     assert "jobs/results/12345-machine-learning-engineer" in out
@@ -170,13 +132,13 @@ def test_google_respects_the_limit(monkeypatch) -> None:
         for i in range(20)
     )
     fake = FakeRequests(FakeResponse(text=listings))
-    out = call(google, "search_google_jobs", fake, monkeypatch, limit=3)
+    out = call_tool(google, "search_google_jobs", fake, monkeypatch, limit=3)
     assert "3 found" in out
 
 
 def test_google_survives_an_unreachable_site(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("timeout"))
-    out = call(google, "search_google_jobs", fake, monkeypatch)
+    out = call_tool(google, "search_google_jobs", fake, monkeypatch)
     assert "No relevant Google roles found right now" in out
 
 
@@ -193,7 +155,7 @@ def test_netflix_parses_positions_and_sorts_newest_first(monkeypatch) -> None:
         {"id": 3, "name": "Payroll Specialist", "t_create": newer},
         {"id": 4, "name": "ML Engineer, Studio"},  # no t_create at all
     ]}))
-    out = call(netflix, "search_netflix_jobs", fake, monkeypatch)
+    out = call_tool(netflix, "search_netflix_jobs", fake, monkeypatch)
 
     assert out.index("Machine Learning Engineer") < out.index("Applied Scientist")
     assert "Payroll Specialist" not in out
@@ -206,7 +168,7 @@ def test_netflix_parses_positions_and_sorts_newest_first(monkeypatch) -> None:
 
 def test_netflix_survives_an_unreachable_api(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("dns failure"))
-    out = call(netflix, "search_netflix_jobs", fake, monkeypatch)
+    out = call_tool(netflix, "search_netflix_jobs", fake, monkeypatch)
     assert "No relevant Netflix roles found right now" in out
 
 
@@ -233,7 +195,7 @@ GREENHOUSE_JOBS = {
 
 def test_greenhouse_filters_by_relevance_and_location(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(GREENHOUSE_JOBS))
-    out = call(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
+    out = call_tool(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
                company="databricks")
 
     assert "Latest Databricks AI/ML roles" in out
@@ -248,7 +210,7 @@ def test_greenhouse_filters_by_relevance_and_location(monkeypatch) -> None:
 
 def test_greenhouse_narrows_by_keyword(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(GREENHOUSE_JOBS))
-    out = call(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
+    out = call_tool(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
                company="databricks", keywords="data scientist")
     assert "Data Scientist, Growth" in out
     assert "Machine Learning Engineer" not in out
@@ -256,14 +218,14 @@ def test_greenhouse_narrows_by_keyword(monkeypatch) -> None:
 
 def test_greenhouse_accepts_any_casing_of_the_company(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(GREENHOUSE_JOBS))
-    out = call(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
+    out = call_tool(greenhouse, "search_greenhouse_jobs", fake, monkeypatch,
                company="  Databricks  ")
     assert "Latest Databricks AI/ML roles" in out
 
 
 def test_greenhouse_lists_supported_companies_for_an_unknown_one(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(GREENHOUSE_JOBS))
-    out = call(greenhouse, "search_greenhouse_jobs", fake, monkeypatch, company="acme")
+    out = call_tool(greenhouse, "search_greenhouse_jobs", fake, monkeypatch, company="acme")
     assert "Unknown company 'acme'" in out
     assert "databricks" in out
     assert fake.calls == []  # no pointless request
@@ -271,16 +233,16 @@ def test_greenhouse_lists_supported_companies_for_an_unknown_one(monkeypatch) ->
 
 def test_greenhouse_distinguishes_down_from_empty(monkeypatch) -> None:
     """"Board unreachable" and "no matching roles" are different answers."""
-    down = call(greenhouse, "search_greenhouse_jobs",
+    down = call_tool(greenhouse, "search_greenhouse_jobs",
                 FakeRequests(error=OSError("503")), monkeypatch, company="stripe")
-    empty = call(greenhouse, "search_greenhouse_jobs",
+    empty = call_tool(greenhouse, "search_greenhouse_jobs",
                  FakeRequests(FakeResponse({"jobs": []})), monkeypatch, company="stripe")
 
     assert "Couldn't reach Stripe's careers board" in down
     assert "No relevant Stripe roles found" in empty
 
 
-@pytest.mark.parametrize("location,is_us", [
+@pytest.mark.parametrize(("location", "is_us"), [
     ("San Francisco, CA", True),
     ("United States", True),
     ("Remote", True),
@@ -325,7 +287,7 @@ BU_RSS = """<rss><channel>
 
 def test_boston_university_parses_the_feed_newest_first(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(text=BU_RSS))
-    out = call(boston_university, BU_TOOL, fake, monkeypatch)
+    out = call_tool(boston_university, BU_TOOL, fake, monkeypatch)
 
     # CDATA unwrapped, entities decoded, irrelevant roles dropped.
     assert "Research Scientist, Machine Learning" in out
@@ -339,14 +301,14 @@ def test_boston_university_parses_the_feed_newest_first(monkeypatch) -> None:
 
 def test_boston_university_keyword_search_overrides_the_profile_filter(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(text=BU_RSS))
-    out = call(boston_university, BU_TOOL, fake, monkeypatch, keywords="groundskeeper")
+    out = call_tool(boston_university, BU_TOOL, fake, monkeypatch, keywords="groundskeeper")
     assert "Groundskeeper" in out
     assert "Research Scientist" not in out
 
 
 def test_boston_university_survives_an_unreachable_feed(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("refused"))
-    out = call(boston_university, BU_TOOL, fake, monkeypatch)
+    out = call_tool(boston_university, BU_TOOL, fake, monkeypatch)
     assert "Couldn't reach Boston University's careers feed" in out
 
 
@@ -359,7 +321,7 @@ def test_northeastern_formats_workdays_relative_dates(monkeypatch) -> None:
          "externalPath": "/job/Boston/Research-Scientist_R123", "postedOn": "Posted 5 Days Ago"},
         {"title": "Data Engineer", "externalPath": "", "postedOn": ""},
     ]}))
-    out = call(northeastern, "search_northeastern_jobs", fake, monkeypatch)
+    out = call_tool(northeastern, "search_northeastern_jobs", fake, monkeypatch)
 
     assert "Latest Northeastern University roles — 2 found" in out
     assert "Posted: Posted 5 Days Ago" in out
@@ -369,18 +331,18 @@ def test_northeastern_formats_workdays_relative_dates(monkeypatch) -> None:
 
 def test_northeastern_defaults_the_search_text(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse({"jobPostings": []}))
-    call(northeastern, "search_northeastern_jobs", fake, monkeypatch)
+    call_tool(northeastern, "search_northeastern_jobs", fake, monkeypatch)
     assert fake.calls[0]["json"]["searchText"] == northeastern.DEFAULT_SEARCH
 
 
 def test_northeastern_caps_the_workday_page_size(monkeypatch) -> None:
     """Workday rejects a page size above 20, so a bigger limit must be clamped."""
     fake = FakeRequests(FakeResponse({"jobPostings": []}))
-    call(northeastern, "search_northeastern_jobs", fake, monkeypatch, limit=25)
+    call_tool(northeastern, "search_northeastern_jobs", fake, monkeypatch, limit=25)
     assert fake.calls[0]["json"]["limit"] == northeastern.API_PAGE_SIZE
 
 
 def test_northeastern_survives_an_unreachable_site(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("refused"))
-    out = call(northeastern, "search_northeastern_jobs", fake, monkeypatch)
+    out = call_tool(northeastern, "search_northeastern_jobs", fake, monkeypatch)
     assert "Couldn't reach Northeastern's careers site" in out

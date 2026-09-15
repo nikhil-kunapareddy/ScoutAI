@@ -10,12 +10,8 @@ import pytest
 from scout.core import settings
 from scout.core.agent import ConversationalAgent
 from scout.slack import bot as slack_bot
-from scout.slack.bot import (
-    MAX_MESSAGE_CHARS,
-    SlackBot,
-    _split_message,
-    install_shutdown_handler,
-)
+from scout.slack.bot import SlackBot, install_shutdown_handler
+from scout.slack.formatting import MAX_MESSAGE_CHARS
 
 
 class FakeApp:
@@ -126,7 +122,7 @@ def test_commands_are_case_insensitive(bot) -> None:
     assert agent.resets == ["U1"]
 
 
-@pytest.mark.parametrize("text,expected", [
+@pytest.mark.parametrize(("text", "expected"), [
     ("--claude", "anthropic"),
     ("--anthropic", "anthropic"),
     ("--ollama", "ollama"),
@@ -238,27 +234,6 @@ def test_long_replies_are_split_across_messages(bot, monkeypatch) -> None:
     assert all(len(chunk) <= MAX_MESSAGE_CHARS for chunk in sent)
     # Nothing is lost or duplicated in the split.
     assert "\n".join(sent) == long_reply
-
-
-# --- Chunking -------------------------------------------------------------
-
-
-def test_short_text_is_one_chunk() -> None:
-    assert _split_message("hello") == ["hello"]
-
-
-def test_split_breaks_on_line_boundaries() -> None:
-    text = "\n".join(["a" * 40] * 10)
-    chunks = _split_message(text, limit=100)
-    assert all(len(c) <= 100 for c in chunks)
-    assert "\n".join(chunks) == text
-
-
-def test_an_over_long_single_line_is_kept_whole() -> None:
-    """A job link must not be cut in half, so an unsplittable line is emitted intact."""
-    line = "x" * 250
-    chunks = _split_message(f"short\n{line}", limit=100)
-    assert line in chunks
 
 
 # --- Shutdown -------------------------------------------------------------

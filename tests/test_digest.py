@@ -140,7 +140,8 @@ def test_long_digest_is_split_across_messages(monkeypatch) -> None:
 
     class FakeClient:
         def __init__(self, token: str) -> None: ...
-        def chat_postMessage(self, channel: str, text: str) -> None:
+        # Named for the Slack SDK method it stands in for.
+        def chat_postMessage(self, channel: str, text: str) -> None:  # noqa: N802
             sent.append((channel, text))
 
     monkeypatch.setattr(notify, "WebClient", FakeClient)

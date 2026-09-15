@@ -11,7 +11,14 @@ import requests
 
 from ...core import settings
 from ..registry import ToolRegistry
-from . import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int, render_postings
+from . import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    JobPosting,
+    clamp_int,
+    json_rows,
+    render_postings,
+)
 
 # POST https://{host}/wday/cxs/{tenant}/{site}/jobs
 HOST = "northeastern.wd1.myworkdayjobs.com"
@@ -62,7 +69,7 @@ def _fetch_jobs(search_text: str, limit: int) -> list[dict] | None:
             timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return resp.json().get("jobPostings", [])
+        return json_rows(resp.json(), "jobPostings")
     except Exception:
         return None
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from scout import alert
 from scout.core import settings
 from scout.stats import parse, render, summarise
@@ -61,12 +63,9 @@ def test_alert_refuses_without_somewhere_to_send(monkeypatch) -> None:
     monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "")
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr("sys.argv", ["scout.alert", "scout@bigtech.service"])
-    try:
+
+    with pytest.raises(SystemExit, match="no alert sent"):
         alert.main()
-    except SystemExit as e:
-        assert "no alert sent" in str(e)
-    else:
-        raise AssertionError("expected SystemExit")
 
 
 def test_alert_dms_the_unit_name_and_its_log(monkeypatch) -> None:

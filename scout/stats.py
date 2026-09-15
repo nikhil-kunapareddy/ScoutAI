@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 #: Units the journal query covers: every bot instance, plus the digest.
@@ -59,7 +60,7 @@ def parse(line: str) -> dict[str, str] | None:
     return fields or None
 
 
-def summarise(lines) -> dict[str, Totals]:
+def summarise(lines: Iterable[str]) -> dict[str, Totals]:
     """Aggregate metrics lines by agent."""
     by_agent: dict[str, Totals] = defaultdict(Totals)
     for line in lines:
@@ -97,8 +98,10 @@ def render(by_agent: dict[str, Totals]) -> str:
         return "No turns recorded in that window."
 
     rows = [
-        f"{'agent':<28} {'turns':>6} {'fail':>5} {'tools':>6} "
-        f"{'in_tok':>9} {'out_tok':>8} {'med_s':>6} {'max_s':>6} {'usd':>8}"
+        (
+            f"{'agent':<28} {'turns':>6} {'fail':>5} {'tools':>6} "
+            f"{'in_tok':>9} {'out_tok':>8} {'med_s':>6} {'max_s':>6} {'usd':>8}"
+        )
     ]
     for name, t in sorted(by_agent.items()):
         failed = t.turns - t.outcomes.get("ok", 0)
@@ -109,30 +112,44 @@ def render(by_agent: dict[str, Totals]) -> str:
         )
     total_usd = sum(t.usd for t in by_agent.values())
     if total_usd:
-        rows.append(f"{'':<28} {'':>6} {'':>5} {'':>6} {'':>9} {'':>8} {'':>6} "
-                    f"{'total':>6} {total_usd:>8.2f}")
+        rows.append(
+            f"{'':<28} {'':>6} {'':>5} {'':>6} {'':>9} {'':>8} {'':>6} "
+            f"{'total':>6} {total_usd:>8.2f}"
+        )
     return "\n".join(rows)
 
 
-def journal_lines(days: int):
+def journal_lines(days: int) -> list[str]:
     """Metrics lines from the systemd journal."""
     command = ["journalctl", "--no-pager", "-o", "cat", "--since", f"-{days}d"]
     for unit in _UNITS:
         command += ["-u", unit]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    # Fixed argv, no shell; `days` is an int by the time it reaches here.
+    result = subprocess.run(  # noqa: S603
+        command, capture_output=True, text=True, check=False
+    )
     return result.stdout.splitlines()
 
 
+def report(days: int, source: str | None = None) -> str:
+    """The table for one window. ``source="-"`` reads log lines from stdin.
+
+    The single place the window is turned into a report, so ``scout stats`` and
+    ``python -m scout.stats`` cannot drift apart.
+    """
+    lines = sys.stdin if source == "-" else journal_lines(days)
+    return render(summarise(lines))
+
+
 def main() -> None:
+    """``python -m scout.stats`` — kept working alongside ``scout stats``."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=7, help="how far back to look")
     parser.add_argument(
         "source", nargs="?", help="'-' to read log lines from stdin instead"
     )
     args = parser.parse_args()
-
-    lines = sys.stdin if args.source == "-" else journal_lines(args.days)
-    print(render(summarise(lines)))
+    print(report(args.days, args.source))
 
 
 if __name__ == "__main__":

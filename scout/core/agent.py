@@ -30,8 +30,10 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from types import ModuleType
+from typing import Protocol
 
 from langchain_core.messages import (
     AIMessage,
@@ -91,6 +93,17 @@ class AgentState(MessagesState):
     profile: str
     #: Backend that produced the last reply — the fallback, if the chosen one failed.
     answered_by: str
+
+
+class AgentNode(Protocol):
+    """One node of the graph: given the state, return the state it adds.
+
+    A Protocol and not a ``Callable[...]`` alias because LangGraph matches node
+    signatures by parameter *name* — a Callable type carries none, so it would
+    not satisfy ``add_node``.
+    """
+
+    def __call__(self, state: AgentState, config: RunnableConfig) -> dict: ...
 
 
 class ConversationalAgent(ABC):
@@ -157,7 +170,7 @@ def build_agent_graph(spec: AgentSpec, tools: list[BaseTool]) -> StateGraph:
     return builder
 
 
-def _model_node(spec: AgentSpec, tools: list[BaseTool]):
+def _model_node(spec: AgentSpec, tools: list[BaseTool]) -> AgentNode:
     """The node that calls the model, retrying once on the fallback backend."""
 
     def call_model(state: AgentState, config: RunnableConfig) -> dict:
@@ -191,7 +204,7 @@ def _instructions(spec: AgentSpec, profile: str) -> str:
     return f"{spec.system_prompt}\n\n{profile}" if profile else spec.system_prompt
 
 
-def _within_window(messages: list[BaseMessage]) -> list[BaseMessage]:
+def _within_window(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     """The tail of the conversation to send, bounded by ``MAX_TURNS``.
 
     ``start_on="human"`` is what keeps the request valid wherever the window

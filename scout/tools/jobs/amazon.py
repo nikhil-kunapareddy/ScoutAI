@@ -19,6 +19,7 @@ from . import (
     JobPosting,
     clamp_int,
     is_ai_ml_role,
+    json_rows,
     render_postings,
     search_queries,
     take_newest,
@@ -70,16 +71,22 @@ def register(reg: ToolRegistry) -> None:
 def _fetch_jobs(query: str) -> list[dict]:
     """Run one keyword search. Returns [] if Amazon is unreachable, so the
     remaining profile queries can still produce an answer."""
+    params: dict[str, str | int] = {
+        "base_query": query,
+        "normalized_country_code[]": "USA",
+        "sort": "recent",
+        "result_limit": API_PAGE_SIZE,
+        "offset": 0,
+    }
     try:
         resp = requests.get(
             SEARCH_URL,
-            params={"base_query": query, "normalized_country_code[]": "USA",
-                    "sort": "recent", "result_limit": API_PAGE_SIZE, "offset": 0},
+            params=params,
             headers={"User-Agent": settings.TOOL_USER_AGENT, "Accept": "application/json"},
             timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
-        return resp.json().get("jobs", [])
+        return json_rows(resp.json(), "jobs")
     except Exception:
         return []
 

@@ -19,7 +19,7 @@ from scout.core.settings import _env_int
 # --- Settings -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("raw,expected", [
+@pytest.mark.parametrize(("raw", "expected"), [
     ("42", 42),
     ("0", 0),
     ("nonsense", 7),   # invalid falls back to the default
@@ -176,7 +176,8 @@ def test_registry_keys_match_their_specs() -> None:
 
 def test_every_agent_is_runnable() -> None:
     for spec in AGENTS.values():
-        assert spec.name and spec.system_prompt
+        assert spec.name
+        assert spec.system_prompt
         # Every listed tool module must actually be one.
         for module in spec.tool_modules:
             assert callable(getattr(module, "register", None))

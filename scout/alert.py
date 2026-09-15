@@ -29,9 +29,12 @@ _CONTEXT_LINES = 20
 
 def recent_log(unit: str) -> str:
     """The tail of ``unit``'s journal, or a note saying why we have none."""
+    command = ["journalctl", "-u", unit, "-n", str(_CONTEXT_LINES), "--no-pager", "-o", "cat"]
     try:
-        return subprocess.run(
-            ["journalctl", "-u", unit, "-n", str(_CONTEXT_LINES), "--no-pager", "-o", "cat"],
+        # Fixed argv and no shell: `unit` reaches journalctl as a single
+        # argument, never word-split, so the only thing it can name is a unit.
+        return subprocess.run(  # noqa: S603
+            command,
             capture_output=True,
             text=True,
             timeout=15,

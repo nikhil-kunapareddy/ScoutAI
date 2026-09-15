@@ -7,10 +7,31 @@ from pathlib import Path
 import docx2txt
 from pypdf import PdfReader
 
-from ..core.paths import DATA_DIR
+from ..core import settings
+from ..core.paths import under_root
 from .registry import ToolRegistry
 
 RESUME_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+
+
+def resume_dir() -> Path:
+    """Where to look for resumes, per ``RESUME_DIR``.
+
+    Resolved on each call rather than at import, so a test — or an operator
+    moving the folder — does not have to reload the module.
+    """
+    return under_root(settings.RESUME_DIR)
+
+
+def resumes_in(directory: Path) -> list[Path]:
+    """Every file in ``directory`` that looks like a resume."""
+    if not directory.is_dir():
+        return []
+    return [
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in RESUME_EXTENSIONS
+    ]
 
 
 def register(reg: ToolRegistry) -> None:
@@ -21,15 +42,14 @@ def register(reg: ToolRegistry) -> None:
         Use this to understand the user's skills, experience, and field before
         searching for jobs or answering questions about their background. Picks
         the most recently modified resume file if several are present."""
-        if not DATA_DIR.is_dir():
-            return "No data/ folder found. Add your resume there (PDF, DOCX, TXT, or MD)."
+        directory = resume_dir()
+        if not directory.is_dir():
+            return (f"No {directory.name}/ folder found. Add your resume there "
+                    "(PDF, DOCX, TXT, or MD).")
 
-        resumes = [
-            path for path in DATA_DIR.iterdir()
-            if path.is_file() and path.suffix.lower() in RESUME_EXTENSIONS
-        ]
+        resumes = resumes_in(directory)
         if not resumes:
-            return ("No resume found in data/. Add a resume file "
+            return (f"No resume found in {directory.name}/. Add a resume file "
                     "(PDF, DOCX, TXT, or MD) to that folder.")
 
         newest = max(resumes, key=lambda p: p.stat().st_mtime)

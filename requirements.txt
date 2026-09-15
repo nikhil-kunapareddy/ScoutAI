@@ -1,5 +1,13 @@
+# Generated from pyproject.toml — do not edit by hand.
+#   python scripts/sync_requirements.py
+#
+# Why both: pyproject.toml is the source of truth, and this flat list is what
+# the Dockerfile and deploy/deploy.sh install from, since a plain list needs no
+# build backend on the target.
+
 slack-bolt>=1.20.0
 langgraph>=1.0.0
+langgraph-checkpoint-sqlite>=2.0.0
 langchain-core>=1.0.0
 langchain-anthropic>=1.0.0
 langchain-ollama>=1.0.0
@@ -8,7 +16,4 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 pypdf>=4.0.0
 docx2txt>=0.8
-langgraph-checkpoint-sqlite>=2.0.0
-# Tracing. Pulled in by langchain-core anyway; named here because the
-# deployment turns it on with LANGSMITH_TRACING.
 langsmith>=0.12.0
