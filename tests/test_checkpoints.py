@@ -11,8 +11,8 @@ from scout.agents import resume_parser
 from scout.agents.resume_tailored import ResumeTailoredAgent
 from scout.core import settings
 from scout.core.agent import Agent
-from scout.core.checkpoints import _resolve, build_checkpointer
-from scout.core.paths import PROJECT_ROOT
+from scout.core.checkpoints import build_checkpointer
+from scout.core.paths import PROJECT_ROOT, under_root
 
 
 @pytest.fixture
@@ -35,11 +35,11 @@ def test_a_configured_path_gets_sqlite_and_creates_the_file(persisted) -> None:
 
 def test_relative_path_is_taken_against_the_project_root() -> None:
     # systemd starts the bot from /, so a bare path must not follow the cwd.
-    assert _resolve("state/scout.sqlite") == PROJECT_ROOT / "state" / "scout.sqlite"
+    assert under_root("state/scout.sqlite") == PROJECT_ROOT / "state" / "scout.sqlite"
 
 
 def test_absolute_path_is_left_alone(tmp_path) -> None:
-    assert _resolve(str(tmp_path / "s.sqlite")) == tmp_path / "s.sqlite"
+    assert under_root(str(tmp_path / "s.sqlite")) == tmp_path / "s.sqlite"
 
 
 def test_history_survives_a_restart(spec, chat_models, persisted) -> None:

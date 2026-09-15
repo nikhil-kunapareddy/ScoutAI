@@ -10,12 +10,13 @@ behind the resume-parser hand-off.
 from __future__ import annotations
 
 from ..core.agent import Agent, AgentSpec, ConversationalAgent
-from . import bigtech, edu, resume_parser
+from . import bigtech, edu, referral, resume_parser
 from .resume_tailored import ResumeTailoredAgent
 
 AGENTS: dict[str, AgentSpec] = {
     bigtech.SPEC.key: bigtech.SPEC,
     edu.SPEC.key: edu.SPEC,
+    referral.SPEC.key: referral.SPEC,
     resume_parser.SPEC.key: resume_parser.SPEC,
 }
 

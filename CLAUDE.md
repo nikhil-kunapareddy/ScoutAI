@@ -3,7 +3,9 @@
 Scout is a multi-agent platform for Slack DM bots, built on **LangGraph**. An
 agent = a system prompt + a set of tools, running on Claude (default), Ollama, or
 the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
-with it, both tailored to the user's resume in `data/`.
+with it, both tailored to the user's resume in `data/`, plus a Referral Window
+that keeps the list of companies the user has a connection at — which the job
+agents read when they rank results.
 
 `README.md` is the short, outward-facing intro; `docs/handbook.md` is the full
 user-facing doc (Slack setup, deployment, env vars). This file is the working map
@@ -17,12 +19,13 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 python run.py                     # BigTech Agent (default)
 AGENT=edu python run.py           # Edu Agent
+AGENT=referral python run.py      # Referral Window (the referral list)
 AGENT=resume python run.py        # Resume Parser alone, for debugging
 
 python -m scout.digest            # run every job agent, DM one merged report
 python -m scout.stats --days 7    # read the turn metrics back
 
-pytest                            # 210 tests, no network or credentials needed
+pytest                            # 233 tests, no network or credentials needed
 ruff check .
 ```
 
@@ -37,12 +40,13 @@ working tree and restarts. See the AWS section of docs/handbook.md.
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and `GraphRunner` |
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
-| `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`) |
+| `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`, `referrals`) |
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/notify.py` | Opening a DM nobody asked for (digest, alerts) |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
+| `scout/core/referrals.py` | The referral list store — JSON in `state/`, keyed by user |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
 | `deploy/` | `deploy.sh` plus the systemd units the box runs |
@@ -97,6 +101,10 @@ Three seams hold the layers apart — keep them intact:
 - **Tools never raise for an expected failure** (site down, no results). Return a
   sentence the model can read and act on. Argument *types* are now LangChain's
   problem — see below.
+- **A tool that needs to know *who* is asking takes `*, config: RunnableConfig`.**
+  LangChain injects it and hides it from the schema, so the model never sees a
+  user id and cannot get one wrong. `referrals.owner_for(config)` turns it into
+  an owner. See `scout/tools/referrals.py`.
 - **Config goes in `settings.py`**, not scattered `os.environ` reads. Nothing there
   raises on import — that's what keeps the package importable without a `.env`.
 - **Anything that can't be shared between agents goes in `.env.<agent>`**, which
@@ -135,6 +143,20 @@ Three seams hold the layers apart — keep them intact:
   slack-bolt is threaded), and then history *and* the cached resume profile
   outlive the process. The deployed bot sets it, so a changed resume needs
   `--reset` to take effect.
+- **The annotation `RunnableConfig` must stay exactly that.** Widening it to
+  `RunnableConfig | None` stops LangChain recognising it: the injection silently
+  stops and `config` reappears as a parameter the model is asked to fill.
+  `test_the_user_id_is_not_in_the_schema_the_model_sees` guards it.
+- **The referral list is deliberately *not* checkpointed.** History is
+  disposable — `--reset` drops a thread — but the list is something the user
+  typed once. It is JSON in `state/`, which `deploy.sh` excludes from its rsync,
+  so a redeploy can't overwrite the box's copy with a laptop's.
+- **Job agents get `referrals_read`, never `referrals`.** Only the Referral
+  Window may write. A searching agent with `add_referral` in reach eventually
+  records something mid-search that the user never asked for.
+- **The digest runs on `digest:<key>` threads, which are not people.**
+  `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
+  looks up a user id that has no referrals and quietly stops ranking by them.
 - **Two bots on one `CHECKPOINT_DB` share a thread.** Thread ids are the bare
   Slack user id (`_config` in `core/agent.py`), not namespaced by agent, so each
   interactive agent needs its own DB path in its `.env.<agent>` — otherwise your

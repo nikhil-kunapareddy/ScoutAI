@@ -23,7 +23,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from . import settings
-from .paths import PROJECT_ROOT
+from .paths import under_root
 
 log = logging.getLogger("scout")
 
@@ -43,20 +43,9 @@ def build_checkpointer() -> BaseCheckpointSaver:
     if not settings.CHECKPOINT_DB:
         return InMemorySaver()
 
-    path = _resolve(settings.CHECKPOINT_DB)
+    path = under_root(settings.CHECKPOINT_DB)
     log.info("Checkpointing conversation state to %s", path)
     return SqliteSaver(_connect(path))
-
-
-def _resolve(configured: str) -> Path:
-    """Absolute path to the database file.
-
-    A relative ``CHECKPOINT_DB`` is taken against the project root, not the
-    working directory: systemd starts the bot from ``/``, so a bare
-    ``state/scout.sqlite`` would otherwise land somewhere nobody expects.
-    """
-    path = Path(configured).expanduser()
-    return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 def _connect(path: Path) -> sqlite3.Connection:

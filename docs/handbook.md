@@ -16,6 +16,7 @@ Two job-search agents ship with it, both tailored to your resume:
 |-------|----------|------------------|
 | **BigTech Agent** (default) | `bigtech` | Amazon, Google, Netflix, and Greenhouse-hosted companies (Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood) |
 | **Edu Agent** | `edu` | Northeastern University, Boston University |
+| **Referral Window** | `referral` | Nothing — keeps the list of companies you have a connection at |
 | **Resume Parser** | `resume` | Nothing — the profile-extraction stage, runnable alone for debugging |
 
 Adding another agent is one small file — see [Adding an agent](#adding-an-agent).
@@ -55,8 +56,10 @@ scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (Agen
    ├── ChatAnthropic        ├── clock.py         get_current_time, get_current_date
    ├── ChatOllama           ├── location.py      get_location
    └── ChatOpenAI           ├── resume.py        get_resume_profile
-       (Llama, OpenAI-      └── jobs/            one module per source
-        compatible)             ├── amazon.py            search_amazon_jobs
+       (Llama, OpenAI-      ├── referrals.py     add_/remove_/list_referrals
+        compatible)         ├── referrals_read.py  list_referrals (read-only view)
+                            └── jobs/            one module per source
+                                ├── amazon.py            search_amazon_jobs
                                 ├── google.py            search_google_jobs
                                 ├── netflix.py           search_netflix_jobs
                                 ├── greenhouse.py        search_greenhouse_jobs
@@ -89,14 +92,16 @@ Three seams keep the layers apart:
 | `scout/core/settings.py` | Shared config from `.env` + `.env.<agent>` (tokens, models, limits, timeouts) |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/core/paths.py` | Filesystem paths (no env dependencies) |
+| `scout/core/referrals.py` | The referral list — JSON in `state/`, keyed by Slack user |
 | `scout/core/models.py` | One LangChain chat model per backend (Claude, Ollama, Llama API) |
-| `scout/tools/` | Tool library + registry; `clock`, `location`, `resume` |
+| `scout/tools/` | Tool library + registry; `clock`, `location`, `resume`, `referrals` |
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds what they share |
 | `scout/slack/bot.py` | Slack adapter — `SlackBot` wires an agent to Slack DMs |
 | `scout/agents/` | One `AgentSpec` per agent, plus the orchestration graph (`resume_tailored.py`) |
 | `tests/` | pytest suite — no network, no credentials needed |
 | `Dockerfile` | Worker image for ECS / GCE / Cloud Run worker pools |
 | `data/` | Your resume(s) — read by `get_resume_profile` (git-ignored) |
+| `state/` | Checkpoint databases and `referrals.json` (git-ignored, never rsynced) |
 | `logs/` | Runtime logs (`bot.log`, rotated; git-ignored) |
 
 ## One-time Slack setup
@@ -183,6 +188,7 @@ the most recently modified file there.
 ```bash
 python run.py                     # BigTech Agent (default)
 AGENT=edu python run.py           # Edu Agent
+AGENT=referral python run.py      # Referral Window
 ```
 
 Then just DM the bot in plain language — it routes through the model with all
@@ -198,6 +204,32 @@ Every reply is tailored to the resume in `data/`: on your first message the
 Resume Parser distills it into a profile (target titles, skills, search
 keywords). That profile is cached in the graph's state, so the parse happens once
 per user, and it is appended to the job agent's instructions on every turn.
+
+## Referrals
+
+The **Referral Window** agent keeps the list of companies where you have a
+connection. Talk to it in plain language:
+
+- "I have a referral at Stripe — ex-teammate from the platform team"
+- "drop Netflix"
+- "who do I know?"
+
+The job agents read that list (they cannot edit it) and put roles at those
+companies first, saying which ones they are — in chat and in the daily digest
+alike. A referral is the strongest signal you have, so it outranks a slightly
+better keyword match somewhere you know nobody.
+
+The list lives in `state/referrals.json`, keyed by Slack user id:
+
+- **`--reset` does not touch it.** That clears conversation history; the list is
+  something you typed once and should still be there afterwards.
+- **A redeploy does not touch it either** — `deploy.sh` excludes `state/` from
+  its rsync, so the box's list is never overwritten by whatever is on a laptop.
+- Set `REFERRALS_FILE` to move it. Relative paths are taken against the project
+  root, not the working directory.
+
+Adding a company already on the list updates it rather than duplicating it, and
+matching ignores case, so "stripe" and "Stripe" are the same entry.
 
 ## Commands
 

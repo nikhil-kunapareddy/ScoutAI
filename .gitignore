@@ -33,6 +33,9 @@ exports/
 # ─── Runtime logs & state ─────────────────────────────────────────────────
 logs/*
 !logs/.gitkeep
+# Checkpoint databases and the referral list. deploy.sh excludes state/ from its
+# rsync too, so the box's copy is never overwritten by a laptop's.
+state/
 *.log
 *.log.*
 *.pid

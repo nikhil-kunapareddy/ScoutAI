@@ -95,6 +95,13 @@ MAX_TOOL_HOPS = _env_int("MAX_TOOL_HOPS", 5)  # tool round-trips per message
 # scout/core/checkpoints.py.
 CHECKPOINT_DB = os.environ.get("CHECKPOINT_DB", "")
 
+# --- Referral list ---
+# Companies the user has a connection at. Unlike CHECKPOINT_DB this defaults to
+# a real path: history is disposable, but a list the user typed by hand should
+# not vanish on restart. Sits in state/ so deploy.sh's rsync leaves it alone.
+# See scout/core/referrals.py.
+REFERRALS_FILE = os.environ.get("REFERRALS_FILE", "state/referrals.json")
+
 # --- Daily digest ---
 # Slack user id the scheduled digest DMs (e.g. U012ABCDEF) — yours, not the
 # bot's. Found under your Slack profile, "Copy member ID".

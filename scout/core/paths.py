@@ -12,3 +12,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 LOG_DIR = PROJECT_ROOT / "logs"
+
+
+def under_root(configured: str) -> Path:
+    """Absolute path for a configured file location.
+
+    A relative path is taken against the project root, not the working
+    directory: systemd starts the bot from ``/``, so a bare ``state/scout.sqlite``
+    would otherwise land somewhere nobody expects.
+    """
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else PROJECT_ROOT / path
