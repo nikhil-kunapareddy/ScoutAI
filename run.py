@@ -1,32 +1,20 @@
-"""Entry point: runs the agent named by ``AGENT`` (default ``bigtech``).
+"""Entry point at the repo root: ``python run.py`` is ``scout run``.
 
-Job-search agents set ``tailor_with_resume`` in their spec, so they run behind
-the Resume Parser hand-off — the profile is distilled once per user and prepended
-to every job-search turn. Agents without the flag run standalone (e.g.
-``AGENT=resume python run.py`` to exercise the parser).
+Kept because it is the shortest thing to type in a fresh checkout, and because
+the deployed systemd units call this file by path. Every flag ``scout run``
+takes works here too::
 
-    python run.py
+    python run.py                     # the agent named by AGENT (default bigtech)
+    python run.py --agent edu         # same as AGENT=edu python run.py
+
+Everything it does lives in ``scout/cli.py``.
 """
 
 from __future__ import annotations
 
-from scout.agents import build_agent, get_spec
-from scout.core import settings
-from scout.core.logging_config import configure_logging
-from scout.slack import SlackBot
+import sys
 
-
-def main() -> None:
-    log = configure_logging()
-    # Check config before building anything: constructing the Slack app verifies
-    # the bot token against Slack, so a missing one should be reported here.
-    settings.require_slack_credentials()
-
-    spec = get_spec(settings.ACTIVE_AGENT)
-    agent = build_agent(spec)
-    log.info("Agent %r ready (default backend=%s)", spec.key, spec.default_backend)
-    SlackBot(agent).start()
-
+from scout.cli import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main(["run", *sys.argv[1:]]))
