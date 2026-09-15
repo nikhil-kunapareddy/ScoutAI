@@ -9,8 +9,13 @@
 # Every enabled scout@ instance is restarted, so a second agent is picked up
 # once it is enabled — nothing here needs editing.
 #
-#   ./deploy/deploy.sh              # code + restart
+# It ships the working tree, so the branch you are on is irrelevant and
+# uncommitted edits go too. What was sent is recorded in /opt/scout/DEPLOYED,
+# because with .git excluded the box has no other way to say what it is running.
+#
+#   ./deploy/deploy.sh                      # code + restart
 #   SCOUT_HOST=1.2.3.4 ./deploy/deploy.sh
+#   SCOUT_REQUIRE_CLEAN=1 ./deploy/deploy.sh  # refuse to ship uncommitted work
 set -euo pipefail
 
 HOST="${SCOUT_HOST:-$(cat "$(dirname "$0")/host" 2>/dev/null || true)}"
@@ -24,16 +29,64 @@ fi
 
 SSH=(ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "ec2-user@$HOST")
 
+# What never leaves the laptop. One list, used twice: rsync skips these, and so
+# must the dirty check below — an untracked file that is not shipped is not a
+# deploy risk, and warning about it trains you to ignore the warning.
+EXCLUDES=(.git .venv __pycache__ .pytest_cache .ruff_cache .pi logs state .DS_Store)
+RSYNC_EXCLUDES=()
+GIT_EXCLUDES=()
+for pattern in "${EXCLUDES[@]}"; do
+  RSYNC_EXCLUDES+=(--exclude "$pattern")
+  GIT_EXCLUDES+=(--exclude="$pattern")
+done
+
+# What is about to ship. This copies the working tree, not a branch, so the
+# commit is a label for what was on the laptop rather than something the host
+# could check out — which is exactly why it is worth writing down. Untracked
+# files count as dirty: rsync sends them, so they run on the box without
+# appearing in any commit.
+REV="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BRANCH="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+TRACKED_EDITS="$(git -C "$REPO" status --porcelain --untracked-files=no 2>/dev/null || true)"
+UNTRACKED="$(git -C "$REPO" ls-files --others --exclude-standard \
+  "${GIT_EXCLUDES[@]}" 2>/dev/null || true)"
+DIRTY=no
+[[ -n "$TRACKED_EDITS$UNTRACKED" ]] && DIRTY=yes
+
+echo "==> Shipping $BRANCH @ $REV (uncommitted changes: $DIRTY)"
+if [[ "$DIRTY" == yes ]]; then
+  # A warning, not a refusal: deploying a work-in-progress to your own bot is a
+  # reasonable thing to want. Knowing you did it afterwards is the hard part.
+  echo "    The box will run code that is not in any commit:" >&2
+  [[ -n "$TRACKED_EDITS" ]] && sed 's/^/      /' <<<"$TRACKED_EDITS" >&2
+  [[ -n "$UNTRACKED" ]] && sed 's/^/      ?? /' <<<"$UNTRACKED" >&2
+  echo "    Set SCOUT_REQUIRE_CLEAN=1 to make this an error instead." >&2
+  if [[ "${SCOUT_REQUIRE_CLEAN:-}" == 1 ]]; then
+    echo "Refusing: SCOUT_REQUIRE_CLEAN=1 and the tree is dirty." >&2
+    exit 1
+  fi
+fi
+
 echo "==> Syncing $REPO to $HOST"
 rsync -az --delete \
   -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new" \
-  --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-  --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.pi' \
-  --exclude 'logs' --exclude 'state' --exclude '.DS_Store' \
+  "${RSYNC_EXCLUDES[@]}" \
   "$REPO/" "ec2-user@$HOST:/opt/scout/app/"
 
 echo "==> Installing dependencies if they changed"
 "${SSH[@]}" '/opt/scout/venv/bin/pip install -q -r /opt/scout/app/requirements.txt'
+
+# Outside /opt/scout/app, so `rsync --delete` never removes it and the next
+# deploy's file list cannot disagree with it. `.git` is excluded from the sync,
+# so this stamp is the only thing on the box that knows what it is running.
+echo "==> Recording the deployed revision"
+"${SSH[@]}" "cat > /opt/scout/DEPLOYED" <<EOF
+commit=$REV
+branch=$BRANCH
+dirty=$DIRTY
+deployed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+deployed_by=$(whoami)@$(hostname -s)
+EOF
 
 echo "==> Installing unit files"
 "${SSH[@]}" 'sudo cp /opt/scout/app/deploy/*.service /opt/scout/app/deploy/*.timer /etc/systemd/system/ && sudo systemctl daemon-reload'
