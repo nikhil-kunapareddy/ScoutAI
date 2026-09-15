@@ -44,9 +44,9 @@ Scout  ▸ Three worth a look, ranked against your résumé:
 
 | | Agent | What it searches |
 |:--:|---|---|
-| <img src="assets/bigtech.png" width="46" alt=""> | **BigTech Agent** | Amazon, Google, Netflix, and Greenhouse-hosted boards — Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood |
+| <img src="assets/bigtech.png" width="46" alt=""> | **BigTech Agent** | Amazon, Google, Netflix, Lenovo, WHOOP, and Greenhouse-hosted boards — Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood |
 | <img src="assets/edu.png" width="46" alt=""> | **Edu Agent** | Northeastern University, Boston University |
-| <img src="assets/referral.png" width="46" alt=""> | **Referral Window** | Nothing — it keeps the list of companies you have a connection at, which the job agents read when they rank results |
+| <img src="assets/referral.png" width="46" alt=""> | **Referral Window** | Only the companies you have a connection at — it keeps that list, and searches every board on it in one pass, naming the ones it couldn't check |
 
 Each one is a single file and its own Slack app. A fourth is
 [one file too](docs/extending.md#an-agent).

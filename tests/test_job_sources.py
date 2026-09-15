@@ -13,9 +13,11 @@ import pytest
 
 from scout.tools.jobs import (
     amazon,
+    ashby,
     boston_university,
     google,
     greenhouse,
+    lenovo,
     netflix,
     northeastern,
 )
@@ -306,6 +308,12 @@ def test_boston_university_keyword_search_overrides_the_profile_filter(monkeypat
     assert "Research Scientist" not in out
 
 
+def test_boston_university_distinguishes_down_from_empty(monkeypatch) -> None:
+    fake = FakeRequests(FakeResponse(text="<rss><channel></channel></rss>"))
+    out = call_tool(boston_university, BU_TOOL, fake, monkeypatch)
+    assert f"No relevant {boston_university.ORGANIZATION} roles found" in out
+
+
 def test_boston_university_survives_an_unreachable_feed(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("refused"))
     out = call_tool(boston_university, BU_TOOL, fake, monkeypatch)
@@ -346,3 +354,175 @@ def test_northeastern_survives_an_unreachable_site(monkeypatch) -> None:
     fake = FakeRequests(error=OSError("refused"))
     out = call_tool(northeastern, "search_northeastern_jobs", fake, monkeypatch)
     assert "Couldn't reach Northeastern's careers site" in out
+
+
+# --- Lenovo ---------------------------------------------------------------
+
+LENOVO_FEED = """<rss><channel>
+<item>
+  <title><![CDATA[Advisory AI Software Engineer]]></title>
+  <link>https://jobs.lenovo.com/careers/JobDetail/Advisory-AI-Software-Engineer/70001</link>
+  <pubDate>Fri, 06 Mar 2026 00:00:00 +0000</pubDate>
+</item>
+<item>
+  <title><![CDATA[Senior Machine Learning Engineer]]></title>
+  <link>https://jobs.lenovo.com/careers/JobDetail/Senior-ML-Engineer/70002</link>
+  <pubDate>Wed, 01 Jul 2026 00:00:00 +0000</pubDate>
+</item>
+<item>
+  <title>ISG Field Specialist, Southeast</title>
+  <link>https://jobs.lenovo.com/careers/JobDetail/ISG-Field-Specialist/70003</link>
+  <pubDate>Tue, 15 Sep 2026 00:00:00 +0000</pubDate>
+</item>
+<item>
+  <title>AI Prototyping Engineer</title>
+  <link>https://jobs.lenovo.com/careers/JobDetail/AI-Prototyping-Engineer/70004</link>
+  <pubDate>not-a-date</pubDate>
+</item>
+</channel></rss>"""
+
+
+def test_lenovo_parses_the_feed_newest_first(monkeypatch) -> None:
+    fake = FakeRequests(FakeResponse(text=LENOVO_FEED))
+    out = call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch)
+
+    assert "Senior Machine Learning Engineer" in out
+    assert "Advisory AI Software Engineer" in out
+    assert out.index("Machine Learning") < out.index("Advisory")  # newer first
+    assert "ISG Field Specialist" not in out  # a sales role the search dragged in
+    assert "Posted: Jul 01, 2026" in out
+    # An unparseable date is shown as the feed wrote it, not silently dropped.
+    assert "Posted: not-a-date" in out
+
+
+def test_lenovo_searches_the_us_only(monkeypatch) -> None:
+    """The feed has no location, so the country facet is what keeps it US-only."""
+    fake = FakeRequests(FakeResponse(text=LENOVO_FEED))
+    call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch, keywords="applied scientist")
+
+    params = fake.calls[0]["params"]
+    assert params["13036"] == "[12016802]"
+    assert params["search"] == "applied scientist"
+
+
+def test_lenovo_runs_every_profile_query_and_de_dupes(monkeypatch) -> None:
+    """Every query returns the same feed; a role must appear once."""
+    fake = FakeRequests(FakeResponse(text=LENOVO_FEED))
+    out = call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch)
+
+    assert len(fake.calls) == len(lenovo.search_queries(""))
+    assert out.count("Senior Machine Learning Engineer") == 1
+    assert "3 found" in out
+
+
+def test_lenovo_survives_an_unreachable_feed(monkeypatch) -> None:
+    fake = FakeRequests(error=OSError("timeout"))
+    out = call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch)
+    assert "No relevant Lenovo roles found right now" in out
+
+
+# --- Ashby ----------------------------------------------------------------
+
+ASHBY_JOBS = {
+    "jobs": [
+        {"title": "Senior Machine Learning Engineer", "jobUrl": "https://ashby/1",
+         "location": "Boston, MA", "publishedAt": "2026-07-15T10:00:00.500+00:00",
+         "isListed": True,
+         "address": {"postalAddress": {"addressCountry": "United States"}}},
+        {"title": "Data Scientist, Growth", "jobUrl": "https://ashby/2",
+         "location": "Mumbai, India", "publishedAt": "2026-08-01T10:00:00.000+00:00",
+         "isListed": True,
+         "address": {"postalAddress": {"addressCountry": "India"}}},
+        {"title": "Physical Therapist", "jobUrl": "https://ashby/3",
+         "location": "Boston, MA", "publishedAt": "2026-08-02T10:00:00.000Z",
+         "isListed": True,
+         "address": {"postalAddress": {"addressCountry": "United States"}}},
+        {"title": "ML Engineer, Perception", "jobUrl": "https://ashby/4",
+         "location": "Boston, MA", "publishedAt": "2026-08-03T10:00:00.000Z",
+         "isListed": False,
+         "address": {"postalAddress": {"addressCountry": "United States"}}},
+        {"title": "AI Research Engineer", "applyUrl": "https://ashby/5/application",
+         "location": "Remote", "publishedAt": "nonsense", "isListed": True},
+    ]
+}
+
+
+def test_ashby_filters_by_relevance_listing_and_country(monkeypatch) -> None:
+    fake = FakeRequests(FakeResponse(ASHBY_JOBS))
+    out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch, company="whoop")
+
+    assert "Latest WHOOP AI/ML roles" in out
+    assert "Senior Machine Learning Engineer" in out
+    assert "Data Scientist, Growth" not in out   # India
+    assert "Physical Therapist" not in out       # not AI/ML
+    assert "ML Engineer, Perception" not in out  # pulled from the board
+    assert "Location: Boston, MA" in out
+    assert "Posted: Jul 15, 2026" in out
+    # No structured country: kept, since a missing country is not evidence of
+    # a foreign role. An unparseable timestamp is not worth echoing at the user.
+    assert "AI Research Engineer" in out
+    assert "Posted: not listed" in out
+    # A row with no jobUrl falls back to the apply link.
+    assert "https://ashby/5/application" in out
+    assert "whoop" in fake.calls[0]["url"]
+
+
+def test_ashby_narrows_by_keyword(monkeypatch) -> None:
+    fake = FakeRequests(FakeResponse(ASHBY_JOBS))
+    out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch,
+                    company="whoop", keywords="research")
+    assert "AI Research Engineer" in out
+    assert "Senior Machine Learning Engineer" not in out
+
+
+def test_ashby_lists_supported_companies_for_an_unknown_one(monkeypatch) -> None:
+    fake = FakeRequests(FakeResponse(ASHBY_JOBS))
+    out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch, company="acme")
+    assert "Unknown company 'acme'" in out
+    assert "whoop" in out
+    assert fake.calls == []  # no pointless request
+
+
+def test_ashby_distinguishes_down_from_empty(monkeypatch) -> None:
+    down = call_tool(ashby, "search_ashby_jobs",
+                     FakeRequests(error=OSError("503")), monkeypatch, company="whoop")
+    empty = call_tool(ashby, "search_ashby_jobs",
+                      FakeRequests(FakeResponse({"jobs": []})), monkeypatch, company="whoop")
+
+    assert "Couldn't reach WHOOP's careers board" in down
+    assert "No relevant WHOOP roles found" in empty
+
+
+# --- What every source owes a caller searching several at once ------------
+
+#: Each source and an argument list for its ``search``, with an empty response
+#: in the shape that source returns.
+SOURCES = [
+    (amazon, (), FakeResponse({"jobs": []})),
+    (google, (), FakeResponse(text="")),
+    (netflix, (), FakeResponse({"positions": []})),
+    (lenovo, (), FakeResponse(text="<rss><channel></channel></rss>")),
+    (greenhouse, ("stripe",), FakeResponse({"jobs": []})),
+    (ashby, ("whoop",), FakeResponse({"jobs": []})),
+    (northeastern, (), FakeResponse({"jobPostings": []})),
+    (boston_university, (), FakeResponse(text="<rss></rss>")),
+]
+SOURCE_IDS = [module.__name__.rsplit(".", 1)[-1] for module, _, _ in SOURCES]
+
+
+@pytest.mark.parametrize(("module", "args", "_response"), SOURCES, ids=SOURCE_IDS)
+def test_a_source_that_cannot_be_reached_returns_none(
+    module, args: tuple, _response: FakeResponse, monkeypatch
+) -> None:
+    """The referral search has to tell "the board is down" from "nothing is
+    open" — per source, that distinction is None rather than an empty list."""
+    monkeypatch.setattr(module, "requests", FakeRequests(error=OSError("down")))
+    assert module.search(*args) is None
+
+
+@pytest.mark.parametrize(("module", "args", "response"), SOURCES, ids=SOURCE_IDS)
+def test_a_source_with_nothing_open_returns_an_empty_list(
+    module, args: tuple, response: FakeResponse, monkeypatch
+) -> None:
+    monkeypatch.setattr(module, "requests", FakeRequests(response))
+    assert module.search(*args) == []

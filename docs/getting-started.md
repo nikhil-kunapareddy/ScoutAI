@@ -216,11 +216,21 @@ scout run --agent referral
 You ▸ I have a referral at Stripe — ex-teammate on the platform team
 You ▸ who do I know?
 You ▸ drop Netflix
+You ▸ what's open where I have a referral?
 ```
 
-The job agents read that list and cannot edit it, which is the point: a
+That last one is what the list is for. The Referral Window searches every
+company on it in a single pass and answers with one merged list — so everything
+in the reply is a role you could ask someone about. It also says what it could
+*not* see: a careers board that was down, and any company Scout has no board for
+(it covers Amazon, Google, Netflix, Lenovo, WHOOP, the Greenhouse-hosted
+companies, and the two universities). A gap gets named rather than quietly
+reading as "nothing open".
+
+The job agents read the same list and cannot edit it, which is the point: a
 searching agent with write access eventually records something you never asked
-for. Roles at companies on your list come first, and the reply says so.
+for. They search by *source* and use the list to rank; the Referral Window
+searches by *company* and uses the list as its scope.
 
 The list lives in `state/referrals.json`. `--reset` does not touch it, and
 neither does a redeploy.

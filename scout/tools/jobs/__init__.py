@@ -11,6 +11,7 @@ clamping, and one Slack output format.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -119,6 +120,14 @@ class JobPosting:
         if self.date:
             return f"{self.date:%b %d, %Y}"
         return self.posted_label or "not listed"
+
+
+#: Every source module exposes its search twice: as a registered tool returning
+#: Slack text, and as a ``search`` of this shape returning the postings
+#: themselves. The second is what lets one caller search several sources and
+#: merge the results — see ``jobs/directory.py``. ``None`` means the source could
+#: not be reached, which is never the same answer as "nothing found".
+Searcher = Callable[[str, int], list[JobPosting] | None]
 
 
 def take_newest(postings: list[JobPosting], limit: int) -> list[JobPosting]:

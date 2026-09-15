@@ -48,18 +48,9 @@ def register(reg: ToolRegistry) -> None:
             limit: Maximum number of roles to return.
         """
         days = clamp_int(days, DEFAULT_DAYS, 1, MAX_DAYS)
-        limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-        cutoff = datetime.now() - timedelta(days=days)
-
-        found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
-        for query in search_queries(keywords):
-            for job in _fetch_jobs(query):
-                posting = _to_posting(job, cutoff)
-                if posting is not None:
-                    found.setdefault(job["id"], posting)
-
-        postings = take_newest(list(found.values()), limit)
         window = "last 24h" if days == 1 else f"last {days} days"
+
+        postings = search(keywords, limit, days)
         if not postings:
             return (f"No relevant Amazon roles found in the {window}. "
                     "Try again later or widen the window.")
@@ -68,8 +59,41 @@ def register(reg: ToolRegistry) -> None:
         )
 
 
-def _fetch_jobs(query: str) -> list[dict]:
-    """Run one keyword search. Returns [] if Amazon is unreachable, so the
+def search(
+    keywords: str = "", limit: int = DEFAULT_LIMIT, days: int = DEFAULT_DAYS
+) -> list[JobPosting] | None:
+    """Amazon's recent AI/ML openings, newest first, or None if it can't be reached.
+
+    The postings rather than the rendered text, so a caller searching several
+    companies at once can merge and count them — see ``jobs/directory.py``. The
+    tool above is this search with one format applied.
+    """
+    days = clamp_int(days, DEFAULT_DAYS, 1, MAX_DAYS)
+    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+    cutoff = datetime.now() - timedelta(days=days)
+
+    found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
+    reached = False
+    for query in search_queries(keywords):
+        jobs = _fetch_jobs(query)
+        if jobs is None:
+            continue
+        reached = True
+        for job in jobs:
+            posting = _to_posting(job, cutoff)
+            if posting is not None:
+                found.setdefault(job["id"], posting)
+
+    # Every query failing means the site is down, which a caller may need to
+    # report differently from "Amazon has nothing". One query getting through is
+    # enough to call the answer real.
+    if not reached:
+        return None
+    return take_newest(list(found.values()), limit)
+
+
+def _fetch_jobs(query: str) -> list[dict] | None:
+    """Run one keyword search. Returns None if Amazon is unreachable, so the
     remaining profile queries can still produce an answer."""
     params: dict[str, str | int] = {
         "base_query": query,
@@ -88,7 +112,7 @@ def _fetch_jobs(query: str) -> list[dict]:
         resp.raise_for_status()
         return json_rows(resp.json(), "jobs")
     except Exception:
-        return []
+        return None
 
 
 def _to_posting(job: dict, cutoff: datetime) -> JobPosting | None:
