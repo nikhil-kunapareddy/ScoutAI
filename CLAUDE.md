@@ -7,36 +7,44 @@ with it, both tailored to the user's resume in `data/`, plus a Referral Window
 that keeps the list of companies the user has a connection at — which the job
 agents read when they rank results.
 
-`README.md` is the short, outward-facing intro; `docs/handbook.md` is the full
-user-facing doc (Slack setup, deployment, env vars). This file is the working map
-and the conventions to keep.
+`README.md` is the short, outward-facing intro; `docs/` is the user-facing set
+(`getting-started`, `configuration`, `architecture`, `extending`, `deployment`,
+`operations`), indexed by `docs/README.md`. This file is the working map and the
+conventions to keep.
 
 ## Commands
 
 ```bash
+make install                      # venv + `pip install -e ".[dev]"`
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
 
-python run.py                     # BigTech Agent (default)
-AGENT=edu python run.py           # Edu Agent
-AGENT=referral python run.py      # Referral Window (the referral list)
-AGENT=resume python run.py        # Resume Parser alone, for debugging
+scout run                         # BigTech Agent (default); python run.py still works
+scout run --agent edu             # same as AGENT=edu scout run
+scout run --agent referral        # Referral Window (the referral list)
+scout run --agent resume          # Resume Parser alone, for debugging
 
-python -m scout.digest            # run every job agent, DM one merged report
-python -m scout.stats --days 7    # read the turn metrics back
+scout digest                      # run every job agent, DM one merged report
+scout stats --days 7              # read the turn metrics back
+scout agents                      # what is registered, and each agent's tools
+scout doctor                      # what is configured here; non-zero if it can't start
 
-pytest                            # 233 tests, no network or credentials needed
-ruff check .
+make check                        # ruff, mypy, pytest --cov — what CI runs
 ```
 
+`scout/cli.py` imports `settings` inside each command, never at module scope:
+`--agent` has to reach the environment before the import that layers
+`.env.<agent>`. `tests/test_cli.py` guards that.
+
 Deployed on an EC2 `t4g.micro` under systemd; `./deploy/deploy.sh` ships the
-working tree and restarts. See the AWS section of docs/handbook.md.
+working tree and restarts. See the AWS section of docs/deployment.md.
 
 ## Layout
 
 | Path | What lives there |
 |------|------------------|
-| `run.py` | Entry point: resolves `AGENT`, checks Slack creds, starts the bot |
+| `scout/cli.py` | The command line: `run`, `digest`, `stats`, `agents`, `doctor` |
+| `run.py` | Thin shim: `python run.py` == `scout run` (the systemd units call it) |
+| `scout/checks.py` | What `scout doctor` reports; local reads only, never a network call |
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and `GraphRunner` |
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
@@ -44,13 +52,15 @@ working tree and restarts. See the AWS section of docs/handbook.md.
 | `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
+| `scout/slack/formatting.py` | `split_message`, shared by the bot and `notify` |
 | `scout/slack/notify.py` | Opening a DM nobody asked for (digest, alerts) |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral list store — JSON in `state/`, keyed by user |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
 | `deploy/` | `deploy.sh` plus the systemd units the box runs |
-| `docs/handbook.md` | The full user-facing doc; `README.md` is the short intro |
+| `scripts/sync_requirements.py` | Regenerates `requirements*.txt` from `pyproject.toml` |
+| `docs/` | The user-facing set; `README.md` is the short intro |
 
 ## The two graphs
 
@@ -110,7 +120,13 @@ Three seams hold the layers apart — keep them intact:
 - **Anything that can't be shared between agents goes in `.env.<agent>`**, which
   layers over `.env`. Today that's the Slack token pair (one app per agent) and
   `CHECKPOINT_DB`. Shared keys stay in `.env` — don't copy them per agent.
-- Ruff, `line-length = 100`, py310 target.
+- **Dependencies are declared in `pyproject.toml`.** `requirements*.txt` are
+  generated (`make requirements`); `tests/test_packaging.py` fails on drift,
+  because the Dockerfile and `deploy.sh` install from the flat list.
+- Ruff, `line-length = 100`, py310 target. `ANN` is on for `scout/`, so every
+  function there is annotated, and `mypy` runs with `disallow_untyped_defs`.
+  The two scoped `mypy` overrides (docx2txt, `scout.core.models`) are explained
+  in `pyproject.toml` — prefer fixing a type over widening them.
 
 ## Invariants worth not breaking
 
@@ -168,9 +184,14 @@ Three seams hold the layers apart — keep them intact:
 ## Tests
 
 `tests/` scripts the chat models (`ScriptedModel` in `conftest.py`, installed into
-`scout.core.models` as a real backend) and stubs every HTTP call, so the suite
-runs in CI with no `.env` and no network. Keep it that way — a test that reaches a
-real job board or model API doesn't belong here.
+`scout.core.models` as a real backend) and stubs every HTTP call (`FakeRequests`
+and `call_tool`, same file), so the suite runs in CI with no `.env` and no
+network. Keep it that way — a test that reaches a real job board or model API
+doesn't belong here.
+
+A test must not depend on the developer's own `.env` or `data/` either: point
+`settings` at a `tmp_path` (see `tests/test_checks.py`), or it passes here and
+fails in CI. Coverage sits at 96%; CI runs 3.10–3.13.
 
 ## Don't commit
 

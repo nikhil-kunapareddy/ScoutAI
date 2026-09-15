@@ -7,18 +7,15 @@
 Ask it in plain English. It reads your résumé once, searches real employer job
 boards, and ranks what fits — then does it again every morning without being asked.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.x-1C3C3C)](https://langchain-ai.github.io/langgraph/)
-[![Claude](https://img.shields.io/badge/Claude-Opus%205-D97757)](https://anthropic.com)
-[![Tests](https://img.shields.io/badge/tests-205%20passing-3FB950)](#built-to-be-maintained)
-[![AWS](https://img.shields.io/badge/deployed-AWS%20EC2-FF9900?logo=amazonaws&logoColor=white)](#runs-for-about-10-a-month)
+[![CI](https://github.com/nikhil-kunapareddy/ScoutAI/actions/workflows/ci.yml/badge.svg)](https://github.com/nikhil-kunapareddy/ScoutAI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-3FB950)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![LangGraph](https://img.shields.io/badge/built%20on-LangGraph-1C3C3C)](https://langchain-ai.github.io/langgraph/)
 [![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
 
 </div>
 
 ---
-
-## What it does
 
 ```
 You    ▸ any AI/ML roles at Netflix or Databricks this week?
@@ -31,74 +28,74 @@ Scout  ▸ Three worth a look, ranked against your résumé:
          3. Applied Scientist I — Amazon, Seattle
             Entry-level, NLP focus. Posted yesterday.
 ```
+
 <sub>Illustrative exchange — real results come from live employer endpoints.</sub>
 
-- **Tailored, not generic.** A résumé-parsing agent distills your background once,
-  and every search is run against it — no re-uploading, no re-explaining.
+- **Tailored, not generic.** A résumé-parsing agent distils your background
+  once, and every search is run against it — no re-uploading, no re-explaining.
 - **Real sources.** Employers' own public endpoints: Amazon's careers JSON,
   Greenhouse's board API, Workday, RSS. Not a scraped aggregator.
 - **Shows up on its own.** A daily digest runs every agent and DMs one merged
   briefing each morning.
-- **Swap models mid-conversation.** `--claude`, `--ollama`, `--llama`. History is
-  provider-agnostic, so the thread survives the switch.
+- **Swap models mid-conversation.** `--claude`, `--ollama`, `--llama`. History
+  is provider-agnostic, so the thread survives the switch.
+
+## What ships with it
+
+| | Agent | What it searches |
+|:--:|---|---|
+| <img src="assets/bigtech.png" width="46" alt=""> | **BigTech Agent** | Amazon, Google, Netflix, and Greenhouse-hosted boards — Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood |
+| <img src="assets/edu.png" width="46" alt=""> | **Edu Agent** | Northeastern University, Boston University |
+| <img src="assets/referral.png" width="46" alt=""> | **Referral Window** | Nothing — it keeps the list of companies you have a connection at, which the job agents read when they rank results |
+
+Each one is a single file and its own Slack app. A fourth is
+[one file too](docs/extending.md#an-agent).
+
+## Quickstart
+
+```bash
+git clone https://github.com/nikhil-kunapareddy/ScoutAI.git
+cd ScoutAI
+make install                  # virtualenv, dependencies, the `scout` command
+source .venv/bin/activate
+cp .env.example .env          # add your Slack and Anthropic keys
+scout doctor                  # says what is still missing
+scout run                     # start the bot, then DM it in Slack
+```
+
+Creating the Slack app takes about five minutes and is the only fiddly part.
+**[docs/getting-started.md](docs/getting-started.md)** walks through all of it.
 
 ## How it works
 
 <div align="center">
-  <img src="assets/sys_design.png" alt="Scout system architecture: Slack DM through the ConversationalAgent seam into the agent graph, with state, observability, and AWS deployment" width="100%">
+  <img src="assets/sys.png" alt="Scout system architecture: a Slack DM enters through the SlackBot adapter and the ConversationalAgent seam into the LangGraph agent graphs, which call the model backends and the tool registry, with conversation state, the scheduled digest, and the EC2 deployment around them" width="100%">
 </div>
 
 A Slack DM enters through a Socket Mode adapter that knows nothing about agents.
-Everything past that point talks to one interface, `ConversationalAgent` — which
+Everything past that point talks to one interface, `ConversationalAgent`, which
 is why a plain agent and the résumé-tailored pipeline take the identical path.
 
 Every agent is **one file**: a system prompt and a list of tools. Adding one
 never touches the graph.
 
-## Engineering worth talking about
+## Documentation
 
-| Decision | Why |
+| | |
 |---|---|
-| **One seam, `ConversationalAgent`** | The Slack layer codes against an interface, so a single agent and the résumé-tailored pipeline take the same path with zero special cases. |
-| **History *is* the checkpointer thread** | Provider-agnostic LangChain messages, one thread per user — which is what lets someone switch models mid-conversation without losing context. |
-| **A hop limit that repairs itself** | When a turn exhausts its tool budget, the abandoned tool calls are answered before the apology is recorded. Skipping that breaks the user's *next* message, not just this one. |
-| **Retry inside the model node** | A node that raises commits nothing, so the fallback starts clean while keeping tool results the turn already fetched. |
-| **Tools never raise on expected failure** | A dead job board returns a sentence the model can read and act on, not a stack trace. |
-| **Cost is measured, not guessed** | One `turn ...` line per turn records latency, hops, and token usage — which is how we found a trivial reply costs 14.5k input tokens. |
+| [Getting started](docs/getting-started.md) | Install, create the Slack app, first conversation |
+| [Configuration](docs/configuration.md) | Every setting, and which file it belongs in |
+| [Architecture](docs/architecture.md) | The graphs, the seams, and the invariants behind them |
+| [Extending](docs/extending.md) | Add an agent, a tool, a job source, or a model provider |
+| [Deployment](docs/deployment.md) | Docker, AWS, GCP, and what it costs to run |
+| [Operations](docs/operations.md) | The digest, turn metrics, tracing, and alerts |
 
-## Built to be maintained
+## Contributing
 
-**205 tests, no network, no credentials.** The chat models are scripted and every
-HTTP call is stubbed, so the suite runs anywhere in about a second.
-
-```bash
-pytest      # 205 passed in 1.02s
-ruff check .
-```
-
-## Runs for about $10 a month
-
-One `t4g.micro` under systemd. Socket Mode dials out, so there's no inbound port,
-no load balancer, and no public surface to attack.
-
-```bash
-./deploy/deploy.sh     # rsync, install deps, restart
-```
-
-Conversation state and the parsed résumé live in SQLite and survive restarts.
-Failures DM you. Traces go to LangSmith when you want them.
-
-## Try it
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env          # add your Slack + Anthropic keys
-python run.py
-```
-
-Full setup, deployment, and extension guide → **[docs/handbook.md](docs/handbook.md)**
+Issues and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). `make check` runs everything CI runs: ruff,
+mypy, and the full suite, which needs no network and no credentials.
 
 <div align="center">
-<sub>Built with LangGraph · Claude · slack-bolt</sub>
+<sub>MIT licensed · built with LangGraph · Claude · slack-bolt</sub>
 </div>

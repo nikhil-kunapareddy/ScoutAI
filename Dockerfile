@@ -1,6 +1,6 @@
 # Socket Mode worker: holds an outbound websocket to Slack, serves no HTTP.
 # Runs as-is on ECS Fargate, GCE/EC2 (via docker or systemd), Lightsail, and
-# Cloud Run worker pools. See the Deployment section of docs/handbook.md.
+# Cloud Run worker pools. See docs/deployment.md.
 FROM python:3.12-slim
 
 # PYTHONUNBUFFERED so logs reach CloudWatch / Cloud Logging as they happen
