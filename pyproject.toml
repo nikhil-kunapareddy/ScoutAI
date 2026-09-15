@@ -33,19 +33,19 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "slack-bolt>=1.20.0",
-    "langgraph>=1.0.0",
-    "langgraph-checkpoint-sqlite>=2.0.0",
-    "langchain-core>=1.0.0",
-    "langchain-anthropic>=1.0.0",
-    "langchain-ollama>=1.0.0",
-    "langchain-openai>=1.0.0",
+    "langgraph>=1.2.11",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "langchain-core>=1.6.3",
+    "langchain-anthropic>=1.7.2",
+    "langchain-ollama>=1.1.0",
+    "langchain-openai>=1.6.2",
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
     "pypdf>=4.0.0",
     "docx2txt>=0.8",
     # Tracing. Pulled in by langchain-core anyway; named here because the
     # deployment turns it on with LANGSMITH_TRACING.
-    "langsmith>=0.12.0",
+    "langsmith>=0.12.4",
 ]
 
 [project.optional-dependencies]
