@@ -5,7 +5,8 @@ agent = a system prompt + a set of tools, running on Claude (default), Ollama, o
 the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
 with it, both tailored to the user's resume in `data/`, plus a Referral Window
 that keeps the list of companies the user has a connection at — which the job
-agents read when they rank results.
+agents read when they rank results, and which the Window itself searches as a
+scope, so its answer is every opening the user could ask a referral for.
 
 `README.md` is the short, outward-facing intro; `docs/` is the user-facing set
 (`getting-started`, `configuration`, `architecture`, `extending`, `deployment`,
@@ -49,7 +50,7 @@ working tree and restarts. See the AWS section of docs/deployment.md.
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`, `referrals`) |
-| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
+| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces, `directory.py` maps a company onto its board |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | `split_message`, shared by the bot and `notify` |
@@ -108,6 +109,11 @@ Three seams hold the layers apart — keep them intact:
   platforms differ too much to share an implementation). Reuse `clamp_int`,
   `is_ai_ml_role`, `JobPosting`, and `render_postings` from the package
   `__init__.py` so every source renders identically.
+- **Every source exposes its search twice:** a registered tool returning Slack
+  text, and a `search(...) -> list[JobPosting] | None` matching `Searcher`, which
+  the tool is a thin renderer over. `None` means the source was unreachable and
+  is never the same answer as `[]`. If the source is a company board, add it to
+  `jobs/directory.py` so a referral there is searchable.
 - **Tools never raise for an expected failure** (site down, no results). Return a
   sentence the model can read and act on. Argument *types* are now LangChain's
   problem — see below.
@@ -170,6 +176,16 @@ Three seams hold the layers apart — keep them intact:
 - **Job agents get `referrals_read`, never `referrals`.** Only the Referral
   Window may write. A searching agent with `add_referral` in reach eventually
   records something mid-search that the user never asked for.
+- **The Referral Window searches only within the list.** It writes the list *and*
+  searches, which the rule above would otherwise forbid; what makes it safe is
+  that its single search tool is `search_referral_jobs`, so there is nothing to
+  search with off-list. Never hand it a per-source tool.
+  `test_the_referral_window_can_only_search_within_the_list` guards it.
+- **`search_referral_jobs` names what it could not check** — a board that was
+  down, a company with no board — separately from "nothing open". Its only claim
+  is completeness, and a silently short list is the one way to break it. That is
+  why company-to-board routing is a table in `jobs/directory.py` rather than
+  something the model is asked to get right.
 - **The digest runs on `digest:<key>` threads, which are not people.**
   `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
   looks up a user id that has no referrals and quietly stops ranking by them.

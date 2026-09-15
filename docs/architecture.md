@@ -36,13 +36,19 @@ scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (Agen
    └── ChatOpenAI           ├── resume.py        get_resume_profile
        (Llama, OpenAI-      ├── referrals.py     add_/remove_/list_referrals
         compatible)         ├── referrals_read.py  list_referrals (read-only view)
+                            ├── referral_jobs.py   search_referral_jobs (the list
+                            │                      as a search scope)
                             └── jobs/            one module per source
                                 ├── amazon.py            search_amazon_jobs
                                 ├── google.py            search_google_jobs
                                 ├── netflix.py           search_netflix_jobs
+                                ├── lenovo.py            search_lenovo_jobs
                                 ├── greenhouse.py        search_greenhouse_jobs
+                                ├── ashby.py             search_ashby_jobs
                                 ├── northeastern.py      search_northeastern_jobs
-                                └── boston_university.py search_boston_university_jobs
+                                ├── boston_university.py search_boston_university_jobs
+                                └── directory.py         company -> board, for the
+                                                         by-company search
 ```
 
 ## The two graphs
@@ -162,7 +168,7 @@ is what lets a user switch model mid-conversation.
 | `scout/core/paths.py` | Filesystem paths, free of config dependencies |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/tools/` | `ToolRegistry` plus the tool modules |
-| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces |
+| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces, `directory.py` the company-to-board map |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | Splitting a reply into Slack-sized messages |
@@ -207,6 +213,16 @@ first — most of them exist because the alternative broke something subtle.
 - **Job agents get `referrals_read`, never `referrals`.** Only the Referral
   Window may write. A searching agent with `add_referral` in reach eventually
   records something mid-search that the user never asked for.
+- **The Referral Window searches, but only inside the list.** It holds
+  `search_referral_jobs` and none of the per-source tools, which is what makes
+  the previous rule survive an agent that both writes the list and searches: it
+  has nothing to search *with* off the list. Giving it a source tool would undo
+  that.
+- **The by-company search names its gaps.** `search_referral_jobs` reports a
+  board it couldn't reach and a company it has no board for, separately from
+  "nothing open". The agent's only claim is that its answer is complete, and a
+  silently short list is the one way to break it — which is also why the routing
+  from company to board is a table in `jobs/directory.py` and not a prompt.
 - **Per-user locks stay.** slack-bolt dispatches on a thread pool; one lock per
   user serialises their turns while other users run concurrently.
 - **The referral list is deliberately *not* checkpointed.** History is

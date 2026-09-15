@@ -46,26 +46,36 @@ def register(reg: ToolRegistry) -> None:
                 defaults to AI/ML-relevant roles.
             limit: Maximum number of roles to return.
         """
-        limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-        feed = _fetch_feed()
-        if feed is None:
+        postings = search(keywords, limit)
+        if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers feed right now. Try again later."
-
-        terms = keywords.lower().split()
-        postings = [
-            posting
-            for item in _ITEM_RE.findall(feed)
-            if (posting := _to_posting(item, terms)) is not None
-        ]
-
-        postings = take_newest(postings, limit)
         if not postings:
             return (f"No relevant {ORGANIZATION} roles found right now. "
                     "Try again later or adjust your keywords.")
         return render_postings(
             f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*", postings
         )
+
+
+def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
+    """BU's current openings, newest first, or None if the feed can't be reached.
+
+    The postings rather than the rendered text, so a caller searching several
+    companies at once can merge and count them — see ``jobs/directory.py``.
+    """
+    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+
+    feed = _fetch_feed()
+    if feed is None:
+        return None
+
+    terms = keywords.lower().split()
+    postings = [
+        posting
+        for item in _ITEM_RE.findall(feed)
+        if (posting := _to_posting(item, terms)) is not None
+    ]
+    return take_newest(postings, limit)
 
 
 def _fetch_feed() -> str | None:

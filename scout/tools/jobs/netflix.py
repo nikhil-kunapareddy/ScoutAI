@@ -43,18 +43,7 @@ def register(reg: ToolRegistry) -> None:
                 (machine learning / applied scientist / AI engineer / etc.).
             limit: Maximum number of roles to return.
         """
-        limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-        found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
-        for query in search_queries(keywords):
-            for position in _fetch_positions(query):
-                job_id = str(position.get("id") or "")
-                title = (position.get("name") or "").strip()
-                if not job_id or job_id in found or not is_ai_ml_role(title):
-                    continue
-                found[job_id] = _to_posting(position, job_id, title)
-
-        postings = take_newest(list(found.values()), limit)
+        postings = search(keywords, limit)
         if not postings:
             return ("No relevant Netflix roles found right now. "
                     "Try again later or widen your keywords.")
@@ -63,8 +52,37 @@ def register(reg: ToolRegistry) -> None:
         )
 
 
-def _fetch_positions(query: str) -> list[dict]:
-    """Run one keyword search. Returns [] if Netflix is unreachable, so the
+def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
+    """Netflix's recent AI/ML openings, newest first, or None if it can't be reached.
+
+    The postings rather than the rendered text, so a caller searching several
+    companies at once can merge and count them — see ``jobs/directory.py``.
+    """
+    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+
+    found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
+    reached = False
+    for query in search_queries(keywords):
+        positions = _fetch_positions(query)
+        if positions is None:
+            continue
+        reached = True
+        for position in positions:
+            job_id = str(position.get("id") or "")
+            title = (position.get("name") or "").strip()
+            if not job_id or job_id in found or not is_ai_ml_role(title):
+                continue
+            found[job_id] = _to_posting(position, job_id, title)
+
+    # Every query failing means the API is down, which a caller may need to
+    # report differently from "Netflix has nothing".
+    if not reached:
+        return None
+    return take_newest(list(found.values()), limit)
+
+
+def _fetch_positions(query: str) -> list[dict] | None:
+    """Run one keyword search. Returns None if Netflix is unreachable, so the
     remaining profile queries can still produce an answer."""
     params: dict[str, str | int] = {
         "domain": "netflix.com",
@@ -84,7 +102,7 @@ def _fetch_positions(query: str) -> list[dict]:
         resp.raise_for_status()
         return json_rows(resp.json(), "positions")
     except Exception:
-        return []
+        return None
 
 
 def _to_posting(position: dict, job_id: str, title: str) -> JobPosting:

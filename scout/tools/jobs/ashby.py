@@ -1,12 +1,16 @@
-"""Greenhouse job search — one implementation for every company hosted there.
+"""Ashby job search — one implementation for every company hosted there.
 
-Many large tech companies publish their board at
-``boards-api.greenhouse.io/v1/boards/{slug}/jobs``, so adding an org is a line in
-``BOARDS``. Sharing an implementation is right here because it is one platform,
-not one job source.
+Ashby publishes each customer's board at
+``api.ashbyhq.com/posting-api/job-board/{slug}``, so adding a company is a line
+in ``BOARDS``. Sharing an implementation is right here for the same reason it is
+in ``greenhouse.py``: this is one platform, not one job source.
 
-The board API has no server-side filtering, so we fetch the full list and filter
-here: AI/ML relevance, US-ish location, newest-first.
+The API does no filtering, so we fetch the board and filter here — AI/ML
+relevance, US location, newest-first. Unlike Greenhouse, the country comes back
+structured, so that filter is exact rather than a reading of free text.
+
+Note this is the *posting* API, not the company's careers page: whoop.com and
+the like sit behind bot protection, while this answers plain JSON.
 """
 
 from __future__ import annotations
@@ -29,41 +33,26 @@ from . import (
     take_newest,
 )
 
-BOARD_URL = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/{slug}"
 
-# Board slug -> display name. Add an org = add a line. All verified live.
+# Board slug -> display name. Add a company = add a line. All verified live.
 BOARDS = {
-    "databricks": "Databricks",
-    "airbnb": "Airbnb",
-    "stripe": "Stripe",
-    "pinterest": "Pinterest",
-    "reddit": "Reddit",
-    "coinbase": "Coinbase",
-    "dropbox": "Dropbox",
-    "robinhood": "Robinhood",
+    "whoop": "WHOOP",
 }
 
-# Markers of a non-US role (Greenhouse locations are free text).
-_NON_US = (
-    "india", "canada", "united kingdom", " uk", "ireland", "germany", "france",
-    "netherlands", "israel", "singapore", "australia", "japan", "china", "brazil",
-    "mexico", "spain", "poland", "costa rica", "argentina", "emea", "apac", "romania",
-    "dublin", "london", "berlin", "toronto", "bengaluru", "bangalore", "tokyo",
-    "amsterdam", "sydney", "são paulo", "sao paulo",
-)
+US = "United States"
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_greenhouse_jobs(
+    def search_ashby_jobs(
         company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
     ) -> str:
-        """Search a big-tech company's Greenhouse careers board for recent US
-        AI/ML job openings and return title, date posted, and link.
+        """Search a company's Ashby careers board for recent US AI/ML job
+        openings and return title, date posted, and link.
 
         Args:
-            company: Which company to search. Supported: databricks, airbnb,
-                stripe, pinterest, reddit, coinbase, dropbox, robinhood.
+            company: Which company to search. Supported: whoop.
             keywords: Optional phrase to narrow titles (e.g. "machine learning").
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
@@ -71,7 +60,7 @@ def register(reg: ToolRegistry) -> None:
         slug = (company or "").strip().lower()
         if slug not in BOARDS:
             supported = ", ".join(sorted(BOARDS))
-            return f"Unknown company '{company}'. Supported Greenhouse companies: {supported}."
+            return f"Unknown company '{company}'. Supported Ashby companies: {supported}."
 
         name = BOARDS[slug]
         postings = search(slug, keywords, limit)
@@ -90,10 +79,10 @@ def search(
 ) -> list[JobPosting] | None:
     """One board's AI/ML openings, newest first, or None if it can't be reached.
 
-    ``company`` is a board slug — a key of ``BOARDS``; an unknown one simply
-    finds no board and reads as unreachable. The postings rather than the
-    rendered text, so a caller searching several companies at once can merge and
-    count them — see ``jobs/directory.py``.
+    ``company`` is a board slug — a key of ``BOARDS``; an unknown one finds no
+    board and reads as unreachable. The postings rather than the rendered text,
+    so a caller searching several companies at once can merge and count them —
+    see ``jobs/directory.py``.
     """
     slug = (company or "").strip().lower()
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
@@ -135,31 +124,39 @@ def _to_posting(job: dict, organization: str, terms: list[str]) -> JobPosting | 
     title = (job.get("title") or "").strip()
     if not is_ai_ml_role(title) or not matches_keywords(title, terms):
         return None
-    location = ((job.get("location") or {}).get("name") or "").strip()
-    if location and not _is_us_location(location):
+    if job.get("isListed") is False:  # pulled from the board but still in the feed
+        return None
+    if not _is_us(job):
         return None
     return JobPosting(
         title=title,
         organization=organization,
-        url=job.get("absolute_url", ""),
-        location=location,
-        date=_parse_published(job),
+        url=job.get("jobUrl") or job.get("applyUrl", ""),
+        location=(job.get("location") or "").strip(),
+        date=_parse_published(job.get("publishedAt")),
     )
 
 
-def _is_us_location(name: str) -> bool:
-    """Best-effort: keep US and generic-remote roles, drop clearly-foreign ones."""
-    low = name.lower()
-    if "united states" in low or "usa" in low or "u.s." in low:
-        return True
-    # What's left is a US city/state or a bare "Remote" — treat as US-eligible.
-    return not any(marker in low for marker in _NON_US)
+def _is_us(job: dict) -> bool:
+    """Whether a row is a US role, by Ashby's structured country.
+
+    A row with no country is kept: every board seen so far fills it in, and
+    dropping a role that might be local costs more than showing one that isn't.
+    """
+    address = (job.get("address") or {}).get("postalAddress") or {}
+    country = (address.get("addressCountry") or "").strip()
+    return not country or country == US
 
 
-def _parse_published(job: dict) -> datetime | None:
-    """Parse the posting date: ISO 8601 with an offset, e.g. 2026-07-01T18:31:32-04:00."""
-    raw = job.get("first_published") or job.get("updated_at") or ""
+def _parse_published(raw: object) -> datetime | None:
+    """Parse ``publishedAt``, e.g. 2026-07-17T19:03:39.500+00:00.
+
+    ``Z`` is normalised first: ``fromisoformat`` only learned to read it in 3.11,
+    and this package supports 3.10.
+    """
+    if not isinstance(raw, str):
+        return None
     try:
-        return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None

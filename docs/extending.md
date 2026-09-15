@@ -203,7 +203,11 @@ That is the whole change. Three things follow from it automatically:
   **joins it to the daily digest** — the digest derives its agents from that
   flag rather than from a list.
 - Give it `referrals_read`, not `referrals`. Only the Referral Window writes to
-  that list.
+  that list — and it can afford to, because the only search tool it holds is
+  `search_referral_jobs`, which cannot look outside the list.
+- If the source is a company board, add it to `jobs/directory.py` too, so a
+  referral there becomes searchable. Greenhouse companies land there on their
+  own.
 
 Each agent is a separate Slack app, so it needs its own token pair in
 `.env.startup` and its own `CHECKPOINT_DB`. See

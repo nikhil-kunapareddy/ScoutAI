@@ -42,19 +42,29 @@ def register(reg: ToolRegistry) -> None:
                 ("machine learning").
             limit: Maximum number of roles to return.
         """
-        limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-        jobs = _fetch_jobs(keywords.strip() or DEFAULT_SEARCH, limit)
-        if jobs is None:
+        postings = search(keywords, limit)
+        if postings is None:
             return "Couldn't reach Northeastern's careers site right now. Try again later."
-
-        postings = [_to_posting(job) for job in jobs[:limit]]
         if not postings:
             return (f"No relevant {ORGANIZATION} roles found right now. "
                     "Try again later or adjust your keywords.")
         return render_postings(
             f"*Latest {ORGANIZATION} roles — {{count}} found:*", postings
         )
+
+
+def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
+    """Northeastern's current openings, or None if the site can't be reached.
+
+    The postings rather than the rendered text, so a caller searching several
+    companies at once can merge and count them — see ``jobs/directory.py``.
+    """
+    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+
+    jobs = _fetch_jobs(keywords.strip() or DEFAULT_SEARCH, limit)
+    if jobs is None:
+        return None
+    return [_to_posting(job) for job in jobs[:limit]]
 
 
 def _fetch_jobs(search_text: str, limit: int) -> list[dict] | None:
