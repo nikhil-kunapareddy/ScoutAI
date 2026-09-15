@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup help
+    url: https://github.com/nikhil-kunapareddy/ScoutAI/blob/main/docs/getting-started.md
+    about: Walk through installing, creating the Slack app, and the first DM.
+  - name: Configuration reference
+    url: https://github.com/nikhil-kunapareddy/ScoutAI/blob/main/docs/configuration.md
+    about: Every environment variable, and which file it belongs in.

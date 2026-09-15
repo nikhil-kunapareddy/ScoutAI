@@ -1,0 +1,41 @@
+# Optional but recommended:
+#     pip install pre-commit && pre-commit install
+#
+# Same checks as `make check` and CI, minus the slow ones. No formatter is
+# configured on purpose: several files align comments and strings by hand, and
+# a reflow would bury the reasoning those lines carry.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      # The one that matters most here: a résumé or a token must never land in
+      # a commit.
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: requirements
+        name: requirements are generated from pyproject
+        entry: python scripts/sync_requirements.py --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|requirements.*\.txt)$

@@ -1,0 +1,46 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please run `scout doctor` first — it reports what is configured without
+        touching the network, and its output answers most setup questions.
+
+        **Never paste a token, an API key, or your résumé.** `scout doctor`
+        prints no secrets; a log line may.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what the bot did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`scout doctor` output"
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "0.1.0, or the short commit sha"
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Model backend
+      options: [Claude (Anthropic API), Ollama (local), Meta Llama API, Not sure]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: From `logs/bot.log`, or `journalctl -u scout@<agent>`.
+      render: text

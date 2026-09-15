@@ -2,20 +2,33 @@
 .env
 .env.*
 
-# Not needed at runtime.
+# Not needed at runtime. Keeping the build context small matters here: assets/
+# alone is several megabytes of screenshots and app icons.
 .git/
 .gitignore
+.github/
 .venv/
 venv/
 tests/
+docs/
+scripts/
+assets/
 logs/
+state/
+build/
+dist/
+*.egg-info/
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
 requirements-dev.txt
-README.md
+*.md
+Makefile
 Dockerfile
 .dockerignore
+.editorconfig
+.pre-commit-config.yaml
 .DS_Store

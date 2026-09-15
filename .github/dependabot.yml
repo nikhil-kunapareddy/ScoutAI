@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Dependencies live in pyproject.toml; requirements*.txt are generated from
+  # it, so a bump has to be applied there and regenerated:
+  #   python scripts/sync_requirements.py
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      langchain:
+        patterns: ["langchain*", "langgraph*", "langsmith"]
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "types-*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

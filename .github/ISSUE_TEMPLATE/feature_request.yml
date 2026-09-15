@@ -1,0 +1,32 @@
+name: Feature request
+description: A new agent, job source, tool, or platform behaviour.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adding an agent, a tool, or a job source is deliberately small — see
+        [docs/extending.md](https://github.com/nikhil-kunapareddy/ScoutAI/blob/main/docs/extending.md).
+        If that is what you need, a pull request is usually faster than an issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The job-search or workflow problem, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this
+      options:
+        - A new job source
+        - A new agent
+        - A new tool
+        - A model provider
+        - Deployment or operations
+        - Something else
