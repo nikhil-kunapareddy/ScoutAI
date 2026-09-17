@@ -32,7 +32,7 @@ classifiers = [
 # disagree about what version this is.
 dynamic = ["version"]
 dependencies = [
-    "slack-bolt>=1.20.0",
+    "slack-bolt>=1.30.0",
     "langgraph>=1.0.0",
     "langgraph-checkpoint-sqlite>=2.0.0",
     "langchain-core>=1.0.0",
