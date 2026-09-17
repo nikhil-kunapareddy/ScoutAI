@@ -33,9 +33,13 @@ def configured(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
-    # Pinned empty rather than inherited: a developer with a key in .env would
-    # otherwise exercise a different branch here than CI does.
+    # Pinned rather than inherited: a developer with a key in .env would
+    # otherwise exercise a different branch here than CI does. DEFAULT_BACKEND
+    # is derived from a key at import, so it needs pinning too — without it the
+    # "fallback differs from the default" line is reached only on a machine that
+    # has an Anthropic key, which is how it passed here and failed in CI.
     monkeypatch.setattr(settings, "LLAMA_API_KEY", "")
+    monkeypatch.setattr(settings, "DEFAULT_BACKEND", "anthropic")
     monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "")
     monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "")
     monkeypatch.setattr(settings, "FALLBACK_BACKEND", "ollama")
