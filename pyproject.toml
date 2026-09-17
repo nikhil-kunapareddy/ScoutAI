@@ -58,9 +58,9 @@ dependencies = [
 # Linters are pinned: a new release must not turn a green pull request red on
 # its own. Dependabot proposes the bumps, CI proves them.
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=5.0.0",
-    "ruff==0.16.6",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff==0.16.7",
     "mypy==2.3.1",
     "types-requests",
 ]
