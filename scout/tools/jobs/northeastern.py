@@ -7,18 +7,9 @@ there is nothing to sort on and the order is left as Workday gave it.
 
 from __future__ import annotations
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
-    DEFAULT_LIMIT,
-    MAX_LIMIT,
-    JobPosting,
-    clamp_int,
-    json_rows,
-    render_postings,
-)
+from . import fetch
+from .posting import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int, render_postings
 
 # POST https://{host}/wday/cxs/{tenant}/{site}/jobs
 HOST = "northeastern.wd1.myworkdayjobs.com"
@@ -60,28 +51,19 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-    jobs = _fetch_jobs(keywords.strip() or DEFAULT_SEARCH, limit)
-    if jobs is None:
+    rows = fetch.post_rows(JOBS_URL, "jobPostings", _query(keywords, limit))
+    if rows is None:
         return None
-    return [_to_posting(job) for job in jobs[:limit]]
+    return [_to_posting(job) for job in rows[:limit]]
 
 
-def _fetch_jobs(search_text: str, limit: int) -> list[dict] | None:
-    """Run one Workday search, or None if the site can't be reached."""
-    try:
-        resp = requests.post(
-            JOBS_URL,
-            json={"appliedFacets": {}, "limit": min(limit, API_PAGE_SIZE),
-                  "offset": 0, "searchText": search_text},
-            headers={"User-Agent": settings.TOOL_USER_AGENT,
-                     "Content-Type": "application/json", "Accept": "application/json"},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return json_rows(resp.json(), "jobPostings")
-    except Exception:
-        return None
+def _query(keywords: str, limit: int) -> dict[str, object]:
+    return {
+        "appliedFacets": {},
+        "limit": min(limit, API_PAGE_SIZE),
+        "offset": 0,
+        "searchText": keywords.strip() or DEFAULT_SEARCH,
+    }
 
 
 def _to_posting(job: dict) -> JobPosting:

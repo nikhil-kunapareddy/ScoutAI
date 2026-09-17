@@ -6,7 +6,8 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from scout.core import settings
-from scout.core.agent import STUCK_REPLY, Agent, ConversationalAgent
+from scout.core.agent import ConversationalAgent
+from scout.core.runner import STUCK_REPLY, Agent
 
 from .conftest import calls_tool, texts
 

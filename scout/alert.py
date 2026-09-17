@@ -13,15 +13,12 @@ is the backstop for that: if it stops arriving, something is wrong.
 
 from __future__ import annotations
 
-import logging
 import subprocess
 import sys
 
 from .core import settings
 from .core.logging_config import configure_logging
 from .slack.notify import post_dm
-
-log = logging.getLogger("scout")
 
 #: Journal lines to quote, enough to show a traceback's last frames.
 _CONTEXT_LINES = 20

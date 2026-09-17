@@ -8,14 +8,13 @@ messages instead of one Slack truncates.
 
 from __future__ import annotations
 
-import logging
-
 from slack_sdk import WebClient
 
 from ..core import settings
+from ..core.logging_config import logger
 from .formatting import split_message
 
-log = logging.getLogger("scout")
+log = logger()
 
 
 def post_dm(user_id: str, text: str) -> None:

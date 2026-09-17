@@ -1,17 +1,16 @@
 """Read the turn metrics back: how much the agents ran, and what it cost.
 
-    python -m scout.stats                  # the last 7 days from the journal
-    python -m scout.stats --days 1
-    journalctl -u 'scout@*' -o cat | python -m scout.stats -
+    scout stats                            # the last 7 days from the journal
+    scout stats --days 1
+    journalctl -u 'scout@*' -o cat | scout stats -
 
-Parsing is deliberately forgiving: a line that doesn't look like a turn is
-skipped rather than fatal, so this keeps working when the log format grows a
-field.
+The command line lives in ``scout/cli.py``; what is here is the reading. Parsing
+is deliberately forgiving: a line that doesn't look like a turn is skipped rather
+than fatal, so this keeps working when the log format grows a field.
 """
 
 from __future__ import annotations
 
-import argparse
 import shlex
 import subprocess
 import sys
@@ -56,8 +55,8 @@ def parse(line: str) -> dict[str, str] | None:
         tokens = shlex.split(line[marker + len("turn ") :])
     except ValueError:
         return None
-    fields = dict(token.split("=", 1) for token in tokens if "=" in token)
-    return fields or None
+    # The marker guarantees a first ``agent=`` token, so this is never empty.
+    return dict(token.split("=", 1) for token in tokens if "=" in token)
 
 
 def summarise(lines: Iterable[str]) -> dict[str, Totals]:
@@ -79,16 +78,18 @@ def summarise(lines: Iterable[str]) -> dict[str, Totals]:
 
 
 def _int(value: str | None) -> int:
+    """A field as an int, or 0 when it is missing or not a number."""
     try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        return int(value or 0)
+    except ValueError:
         return 0
 
 
 def _float(value: str | None) -> float:
+    """A field as a float, or 0.0 when it is missing or not a number."""
     try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        return float(value or 0.0)
+    except ValueError:
         return 0.0
 
 
@@ -103,14 +104,14 @@ def render(by_agent: dict[str, Totals]) -> str:
             f"{'in_tok':>9} {'out_tok':>8} {'med_s':>6} {'max_s':>6} {'usd':>8}"
         )
     ]
-    for name, t in sorted(by_agent.items()):
-        failed = t.turns - t.outcomes.get("ok", 0)
+    for name, totals in sorted(by_agent.items()):
+        failed = totals.turns - totals.outcomes.get("ok", 0)
         rows.append(
-            f"{name:<28} {t.turns:>6} {failed:>5} {t.tool_calls:>6} "
-            f"{t.in_tokens:>9} {t.out_tokens:>8} "
-            f"{t.median_seconds:>6.1f} {t.slowest:>6.1f} {t.usd:>8.2f}"
+            f"{name:<28} {totals.turns:>6} {failed:>5} {totals.tool_calls:>6} "
+            f"{totals.in_tokens:>9} {totals.out_tokens:>8} "
+            f"{totals.median_seconds:>6.1f} {totals.slowest:>6.1f} {totals.usd:>8.2f}"
         )
-    total_usd = sum(t.usd for t in by_agent.values())
+    total_usd = sum(totals.usd for totals in by_agent.values())
     if total_usd:
         rows.append(
             f"{'':<28} {'':>6} {'':>5} {'':>6} {'':>9} {'':>8} {'':>6} "
@@ -132,25 +133,6 @@ def journal_lines(days: int) -> list[str]:
 
 
 def report(days: int, source: str | None = None) -> str:
-    """The table for one window. ``source="-"`` reads log lines from stdin.
-
-    The single place the window is turned into a report, so ``scout stats`` and
-    ``python -m scout.stats`` cannot drift apart.
-    """
+    """The table for one window. ``source="-"`` reads log lines from stdin."""
     lines = sys.stdin if source == "-" else journal_lines(days)
     return render(summarise(lines))
-
-
-def main() -> None:
-    """``python -m scout.stats`` — kept working alongside ``scout stats``."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=7, help="how far back to look")
-    parser.add_argument(
-        "source", nargs="?", help="'-' to read log lines from stdin instead"
-    )
-    args = parser.parse_args()
-    print(report(args.days, args.source))
-
-
-if __name__ == "__main__":
-    main()

@@ -14,7 +14,6 @@ the right one.
 from __future__ import annotations
 
 import json
-import logging
 import threading
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -24,8 +23,6 @@ from langchain_core.runnables import RunnableConfig
 
 from . import settings
 from .paths import under_root
-
-log = logging.getLogger("scout")
 
 #: The digest runs each agent on its own thread (``digest:<key>``) rather than
 #: the user's, so a digest turn asking for referrals would otherwise look up an
@@ -111,7 +108,7 @@ def add(owner: str, company: str, contact: str = "", note: str = "") -> tuple[Re
             note=note.strip() or found.note,
             added=found.added,
         )
-        data[owner] = [merged if r is found else r for r in existing]
+        data[owner] = [merged if entry is found else entry for entry in existing]
         _write(data)
         return merged, False
 
@@ -124,7 +121,7 @@ def remove(owner: str, company: str) -> Referral | None:
         found = _find(existing, company)
         if found is None:
             return None
-        data[owner] = [r for r in existing if r is not found]
+        data[owner] = [entry for entry in existing if entry is not found]
         _write(data)
         return found
 
@@ -136,7 +133,10 @@ def _find(referrals: list[Referral], company: str) -> Referral | None:
     already in the list.
     """
     wanted = company.strip().casefold()
-    return next((r for r in referrals if r.company.casefold() == wanted), None)
+    return next(
+        (referral for referral in referrals if referral.company.casefold() == wanted),
+        None,
+    )
 
 
 def _read() -> dict[str, list[Referral]]:
@@ -165,7 +165,7 @@ def _write(data: dict[str, list[Referral]]) -> None:
     path = store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        owner: [asdict(r) for r in entries]
+        owner: [asdict(referral) for referral in entries]
         for owner, entries in data.items() if entries
     }
     tmp = path.with_suffix(f"{path.suffix}.tmp")

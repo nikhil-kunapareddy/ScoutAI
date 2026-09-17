@@ -15,7 +15,7 @@ make test             # the whole suite in about a second: no network, no creden
 ```
 
 No `.env` is needed to work on the code — only to talk to Slack. See
-[docs/getting-started.md](docs/getting-started.md) for that.
+[getting-started.md](getting-started.md) for that.
 
 ## The loop
 
@@ -31,7 +31,7 @@ be green too; it runs the same four commands.
 1. **Adding an agent is one file.** A module in `scout/agents/` defining
    `SPEC = AgentSpec(...)`, registered in `AGENTS`. If your change touches the
    graph to add an agent, something has gone wrong — see
-   [docs/extending.md](docs/extending.md).
+   [extending.md](extending.md).
 2. **A tool's signature and docstring are its schema.** LangChain derives what
    the model sees from your annotations and the Google-style `Args:` block, so
    annotate every parameter and document it. `ruff` enforces the second half.
@@ -60,7 +60,7 @@ Some behaviour here is load-bearing in ways a test name alone won't tell you:
 the trimming that keeps a conversation valid, the hop limit that repairs a
 thread, the injected `config` that keeps user ids out of the model's schema.
 They are listed, with the reasoning, in
-[docs/architecture.md](docs/architecture.md#invariants-worth-not-breaking).
+[architecture.md](architecture.md#invariants-worth-not-breaking).
 Each one has a test; if you find yourself deleting that test, read the entry
 first.
 
@@ -69,7 +69,7 @@ first.
 - One topic per pull request, with a subject line in the imperative
   ("Add the Referral Window agent"), and the *why* in the body.
 - Update the docs in the same change when behaviour or configuration moves.
-  `docs/configuration.md` and `.env.example` are a pair.
+  `configuration.md` and `.env.example` are a pair.
 - Add a line to `CHANGELOG.md` under `Unreleased`.
 - Dependencies are declared in `pyproject.toml`; `requirements*.txt` are
   generated from it with `make requirements`.

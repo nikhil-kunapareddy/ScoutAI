@@ -58,7 +58,7 @@ def register(reg: ToolRegistry) -> None:
             listed = referrals.list_for(owner)
             if not listed:
                 return f"'{company}' isn't on the list — it's empty."
-            names = ", ".join(r.company for r in listed)
+            names = ", ".join(referral.company for referral in listed)
             return f"'{company}' isn't on the list. Currently listed: {names}."
         return f"Removed *{removed.company}* from the referral list."
 
@@ -82,5 +82,5 @@ def render_list(config: RunnableConfig) -> str:
     if not listed:
         return ("No referrals recorded yet. Add one by naming the company — "
                 "for example, \"I have a referral at Stripe\".")
-    lines = "\n".join(f"• {r.render()}" for r in listed)
+    lines = "\n".join(f"• {referral.render()}" for referral in listed)
     return f"*Referral connections — {len(listed)}:*\n{lines}"

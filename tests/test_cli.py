@@ -190,3 +190,17 @@ def test_an_unknown_command_is_an_argparse_error() -> None:
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["nope"])
     assert exit_info.value.code == 2
+
+
+def test_the_module_entry_point_is_the_same_command_line() -> None:
+    """``python -m scout`` and the installed ``scout`` script must not drift."""
+    from scout import __main__
+
+    assert __main__.main is cli.main
+
+
+def test_the_repo_root_script_is_the_same_command_line() -> None:
+    """``python run.py`` is what the systemd units call by path."""
+    import run
+
+    assert run.main is cli.main

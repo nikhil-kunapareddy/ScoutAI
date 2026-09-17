@@ -12,6 +12,7 @@ exactly as it reaches Claude or Ollama.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -24,6 +25,29 @@ from scout.core import models as models_module
 from scout.core import settings
 from scout.core.agent import AgentSpec
 from scout.tools import build_registry
+from scout.tools.jobs import fetch as jobs_fetch
+
+# Importing ``scout.core.settings`` loads the developer's ``.env``, which may
+# switch LangSmith tracing on — and a test run must not ship anything to a
+# hosted service. Switched off here, after the import that could enable it, so
+# the suite behaves the same on a laptop as it does in CI.
+for _tracing in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
+    os.environ[_tracing] = "false"
+
+# Langfuse is the other way round: Scout reads the key pair itself (see
+# ``scout.core.tracing``), and that pair is the switch. Both copies are pinned —
+# the environment, because ``test_config.py`` reloads ``settings`` and dotenv
+# will not overwrite a key that is already set, and the already-loaded module,
+# because the import above has read it once.
+#
+# The host is pinned for a sharper reason: the SDK reads ``LANGFUSE_BASE_URL``
+# from the environment *ahead* of the host it is handed, so a developer with a
+# real one in ``.env`` had the one test that builds a real client posting to
+# Langfuse Cloud (a 401, with fake keys — but egress all the same).
+for _key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL", "LANGFUSE_HOST"):
+    os.environ[_key] = ""
+settings.LANGFUSE_PUBLIC_KEY = ""
+settings.LANGFUSE_SECRET_KEY = ""
 
 
 class ScriptedModel(BaseChatModel):
@@ -172,9 +196,25 @@ class FakeRequests:
     post = _handle
 
 
+def stub_requests(monkeypatch, module, fake: FakeRequests) -> None:
+    """Point ``module``'s HTTP at ``fake``.
+
+    Job sources reach the network through ``scout.tools.jobs.fetch``, so that is
+    the one seam to stub; a module that still calls ``requests`` itself (the
+    location tool) is stubbed in place.
+    """
+    target = module if hasattr(module, "requests") else jobs_fetch
+    monkeypatch.setattr(target, "requests", fake)
+
+
+def registered_tools(*modules) -> dict:
+    """Every tool the given modules register, by name, in registration order."""
+    return {tool.name: tool for tool in build_registry(list(modules)).tools}
+
+
 def call_tool(module, tool_name: str, fake: FakeRequests, monkeypatch, **args) -> str:
     """Register ``module``'s tools against a stubbed ``requests`` and call one."""
-    monkeypatch.setattr(module, "requests", fake)
+    stub_requests(monkeypatch, module, fake)
     registry = build_registry([module])
     tool = next(t for t in registry.tools if t.name == tool_name)
     return tool.invoke(args)

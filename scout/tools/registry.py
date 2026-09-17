@@ -40,7 +40,3 @@ class ToolRegistry:
             )
         )
         return fn
-
-    def names(self) -> list[str]:
-        """Names of every registered tool, in registration order."""
-        return [tool.name for tool in self.tools]

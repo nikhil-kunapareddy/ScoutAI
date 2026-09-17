@@ -8,10 +8,13 @@ that keeps the list of companies the user has a connection at — which the job
 agents read when they rank results, and which the Window itself searches as a
 scope, so its answer is every opening the user could ask a referral for.
 
-`README.md` is the short, outward-facing intro; `docs/` is the user-facing set
-(`getting-started`, `configuration`, `architecture`, `extending`, `deployment`,
-`operations`), indexed by `docs/README.md`. This file is the working map and the
-conventions to keep.
+`README.md` is the short, outward-facing intro; `docs/` is every other document
+— the user-facing set (`getting-started`, `configuration`, `architecture`,
+`extending`, `deployment`, `operations`) and the project ones (`CONTRIBUTING`,
+`CODE_OF_CONDUCT`, `SECURITY`, `CHANGELOG`), all indexed by `docs/README.md`.
+Only three files stay in the root, each because something reads it there:
+`README.md` and `LICENSE` are named by path in `pyproject.toml`, and this file
+is the working map and the conventions to keep.
 
 ## Commands
 
@@ -46,11 +49,12 @@ working tree and restarts. See the AWS section of docs/deployment.md.
 | `scout/cli.py` | The command line: `run`, `digest`, `stats`, `agents`, `doctor` |
 | `run.py` | Thin shim: `python run.py` == `scout run` (the systemd units call it) |
 | `scout/checks.py` | What `scout doctor` reports; local reads only, never a network call |
-| `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, and `GraphRunner` |
+| `scout/core/agent.py` | `AgentSpec`, `AgentState`, `ConversationalAgent`, and the graph builder |
+| `scout/core/runner.py` | `GraphRunner` and `Agent` — driving a compiled graph for many users |
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`, `referrals`) |
-| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces, `directory.py` maps a company onto its board |
+| `scout/tools/jobs/` | One module per job source, over shared parts: `fetch` (HTTP), `feeds` (RSS), `posting` (the record, merging, rendering), `relevance` (which titles count), `hosted_board` (the Greenhouse/Ashby shape), `directory` (company → board) |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | `split_message`, shared by the bot and `notify` |
@@ -58,10 +62,11 @@ working tree and restarts. See the AWS section of docs/deployment.md.
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral list store — JSON in `state/`, keyed by user |
 | `scout/core/metrics.py` | The one-line-per-turn record |
+| `scout/core/tracing.py` | Langfuse — the per-turn call tree; the only module that imports it |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
 | `deploy/` | `deploy.sh` plus the systemd units the box runs |
 | `scripts/sync_requirements.py` | Regenerates `requirements*.txt` from `pyproject.toml` |
-| `docs/` | The user-facing set; `README.md` is the short intro |
+| `docs/` | Every document except the root three: the user-facing set plus `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY` and `CHANGELOG`, indexed by `docs/README.md` |
 
 ## The two graphs
 
@@ -106,9 +111,12 @@ Three seams hold the layers apart — keep them intact:
   signature and Google-style `Args:` block *are* the schema LangChain derives and
   the model reads — annotate every parameter and document it.
 - **Adding a job source:** one module per source under `scout/tools/jobs/` (the
-  platforms differ too much to share an implementation). Reuse `clamp_int`,
-  `is_ai_ml_role`, `JobPosting`, and `render_postings` from the package
-  `__init__.py` so every source renders identically.
+  platforms differ too much to share an implementation). Import the shared parts
+  from the module that owns them — `fetch.get_rows`/`get_text`, `feeds.items`,
+  `posting.JobPosting`/`merge_queries`/`render_postings`, `relevance.is_ai_ml_role`
+  — rather than reimplementing them, so every source renders identically and
+  means the same thing by "unreachable". A source on a platform that hosts many
+  companies is a `HostedBoard`, not a ninth implementation.
 - **Every source exposes its search twice:** a registered tool returning Slack
   text, and a `search(...) -> list[JobPosting] | None` matching `Searcher`, which
   the tool is a thin renderer over. `None` means the source was unreachable and
@@ -121,11 +129,19 @@ Three seams hold the layers apart — keep them intact:
   LangChain injects it and hides it from the schema, so the model never sees a
   user id and cannot get one wrong. `referrals.owner_for(config)` turns it into
   an owner. See `scout/tools/referrals.py`.
+- **Observability is added to a config, never to a code path.** `respond`
+  passes its run config through `tracing.observed`, which returns an
+  instrumented copy or the original; nothing outside `core/tracing.py` imports
+  Langfuse, and no branch in the graph knows whether a turn is traced.
 - **Config goes in `settings.py`**, not scattered `os.environ` reads. Nothing there
   raises on import — that's what keeps the package importable without a `.env`.
 - **Anything that can't be shared between agents goes in `.env.<agent>`**, which
   layers over `.env`. Today that's the Slack token pair (one app per agent) and
   `CHECKPOINT_DB`. Shared keys stay in `.env` — don't copy them per agent.
+- **`langchain` is a dependency of Langfuse's handler, not of Scout.** Nothing
+  in the package imports it — langfuse's LangChain integration imports it to
+  tell v0 from v1 and refuses to load without it. Keep importing from
+  `langchain_core`.
 - **Dependencies are declared in `pyproject.toml`.** `requirements*.txt` are
   generated (`make requirements`); `tests/test_packaging.py` fails on drift,
   because the Dockerfile and `deploy.sh` install from the flat list.
@@ -194,6 +210,35 @@ Three seams hold the layers apart — keep them intact:
   interactive agent needs its own DB path in its `.env.<agent>` — otherwise your
   conversations with the two bots interleave into one history. The digest is
   already safe: it uses `digest:<key>`.
+- **Monitoring never breaks a turn.** The Langfuse import, client and handler
+  are built inside one `try` in `tracing.handler`, which logs once and leaves
+  tracing off for the process; export is batched on a background thread, so an
+  unreachable backend costs a turn nothing. The traced config is a *copy*, so
+  the checkpointer reads and the `_give_up` repair stay outside the trace.
+  `test_a_turn_still_answers_when_tracing_will_not_start` guards it.
+- **Trace names are an API, and the trace's input/output is the reply.**
+  `SLACK_TRACE`/`DIGEST_TRACE` carry no user, agent or model: Langfuse
+  dashboards, saved views and judges target names, so anything per-run in one
+  fragments all three. `traced` owns the root span for the same reason the name
+  matters — trace-level input and output are read off it, and they have to be
+  the question and the answer, not LangGraph's message list. `Turn.answered`
+  is how the reply gets there, on the stuck path too.
+- **Langfuse settings the SDK also reads are read under both names.**
+  `LANGFUSE_BASE_URL` outranks the `host=` we pass to the client, so reading
+  only `LANGFUSE_HOST` let `scout doctor` report the EU default while traces
+  went to the US one. `_env_any` reads what the SDK reads, in its order.
+  `test_env_any_reads_the_names_in_order` guards it.
+- **Langfuse's key pair is the switch**, unlike `LANGSMITH_TRACING`, which
+  LangSmith reads itself. `tracing.REQUIRES` is shared with `scout doctor`, so
+  the report and the runtime cannot disagree; half a pair is a warning, because
+  it is the one state that reads as "on" in a `.env` while tracing nothing.
+- **The suite must ship no traces.** `tests/conftest.py` pins
+  `LANGSMITH_TRACING=false`, empties the Langfuse key pair *and* the two host
+  names — the host because the SDK reads `LANGFUSE_BASE_URL` ahead of the host
+  it is handed, which had one test posting to Langfuse Cloud. In
+  `tests/test_tracing.py` the `scripted_handler` fixture pulls in `root_span`
+  and `attributes` for the same reason: tracing on with a real client builds a
+  real span and queues it for export.
 - The bot answers DMs only (`channel_type == "im"`), ignoring channels, bots, and
   edits.
 
@@ -203,11 +248,17 @@ Three seams hold the layers apart — keep them intact:
 `scout.core.models` as a real backend) and stubs every HTTP call (`FakeRequests`
 and `call_tool`, same file), so the suite runs in CI with no `.env` and no
 network. Keep it that way — a test that reaches a real job board or model API
-doesn't belong here.
+doesn't belong here. Job sources are stubbed at one seam, `jobs/fetch.requests`,
+which is the point of them all going through `fetch`.
 
 A test must not depend on the developer's own `.env` or `data/` either: point
 `settings` at a `tmp_path` (see `tests/test_checks.py`), or it passes here and
-fails in CI. Coverage sits at 96%; CI runs 3.10–3.13.
+fails in CI. Coverage is 100% of statements *and* branches, and `fail_under`
+holds it there; CI runs 3.10–3.13.
+
+The suite also pins `LANGSMITH_TRACING=false` (`tests/conftest.py`): importing
+`settings` loads the developer's `.env`, and a test run must not ship traces to
+a hosted service.
 
 ## Don't commit
 

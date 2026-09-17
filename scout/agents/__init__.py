@@ -9,7 +9,8 @@ behind the resume-parser hand-off.
 
 from __future__ import annotations
 
-from ..core.agent import Agent, AgentSpec, ConversationalAgent
+from ..core.agent import AgentSpec, ConversationalAgent
+from ..core.runner import Agent
 from . import bigtech, edu, referral, resume_parser
 from .resume_tailored import ResumeTailoredAgent
 

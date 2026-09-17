@@ -30,4 +30,4 @@ def register(reg: ToolRegistry) -> None:
         if data.get("status") != "success":
             return "Location unavailable."
         parts = [data.get("city"), data.get("regionName"), data.get("country")]
-        return ", ".join(p for p in parts if p) or "Location unavailable."
+        return ", ".join(part for part in parts if part) or "Location unavailable."

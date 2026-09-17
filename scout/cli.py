@@ -132,8 +132,8 @@ def _agents(_args: argparse.Namespace) -> int:
         marks = " (resume-tailored)" if spec.tailor_with_resume else ""
         print(f"{key:<10} {spec.name}{marks}")
         print(f"{'':<10} backend: {spec.default_backend}")
-        tools = agent_tools(spec)
-        print(f"{'':<10} tools:   {', '.join(t.name for t in tools) or 'none'}")
+        names = [tool.name for tool in agent_tools(spec)]
+        print(f"{'':<10} tools:   {', '.join(names) or 'none'}")
     return 0
 
 

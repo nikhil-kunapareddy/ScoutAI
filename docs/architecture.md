@@ -25,7 +25,7 @@ Slack DM
 scout/slack/bot.py ────── SlackBot: DM filtering + text commands (--claude, --reset, …)
    │  talks only to ConversationalAgent, so it needs no graph knowledge
    ▼
-scout/core/agent.py ───── GraphRunner: one checkpointer thread per user (that
+scout/core/runner.py ──── GraphRunner: one checkpointer thread per user (that
    │                      thread is their history) + their chosen model
    │
    │ (model request)          │ (tool calls)          ▲ declared by
@@ -38,7 +38,9 @@ scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (Agen
         compatible)         ├── referrals_read.py  list_referrals (read-only view)
                             ├── referral_jobs.py   search_referral_jobs (the list
                             │                      as a search scope)
-                            └── jobs/            one module per source
+                            └── jobs/            one module per source, over
+                                │                    fetch / feeds / posting /
+                                │                    relevance / hosted_board
                                 ├── amazon.py            search_amazon_jobs
                                 ├── google.py            search_google_jobs
                                 ├── netflix.py           search_netflix_jobs
@@ -159,16 +161,18 @@ is what lets a user switch model mid-conversation.
 |------|------------------|
 | `scout/cli.py` | The command line: `run`, `digest`, `stats`, `agents`, `doctor` |
 | `run.py` | `python run.py` — the same thing as `scout run`, kept for the systemd units |
-| `scout/core/agent.py` | `AgentSpec`, `AgentState`, the graph builder, `GraphRunner` |
+| `scout/core/agent.py` | `AgentSpec`, `AgentState`, `ConversationalAgent`, the graph builder |
+| `scout/core/runner.py` | `GraphRunner`, `Agent` — driving a compiled graph for many users |
 | `scout/core/models.py` | One LangChain chat model per backend, built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral store — JSON in `state/`, keyed by user |
 | `scout/core/metrics.py` | The one-line-per-turn record |
+| `scout/core/tracing.py` | Langfuse: the per-turn call tree, and the only module that knows it exists |
 | `scout/core/paths.py` | Filesystem paths, free of config dependencies |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/tools/` | `ToolRegistry` plus the tool modules |
-| `scout/tools/jobs/` | One module per job source; `__init__.py` holds the shared pieces, `directory.py` the company-to-board map |
+| `scout/tools/jobs/` | One module per job source, over shared parts (`fetch`, `feeds`, `posting`, `relevance`, `hosted_board`); `directory.py` the company-to-board map |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | Splitting a reply into Slack-sized messages |
@@ -187,9 +191,10 @@ is what lets a user switch model mid-conversation.
 | **A hop limit that repairs itself** | When a turn exhausts its tool budget, the abandoned tool calls are answered before the apology is recorded. Skipping that breaks the user's *next* message, not just this one. |
 | **Retry inside the model node** | A node that raises commits nothing, so the fallback starts clean while keeping tool results the turn already fetched. |
 | **Tools never raise on expected failure** | A dead job board returns a sentence the model can read and act on, not a stack trace. |
-| **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, one scraped page. What they *do* share — the AI/ML filter, argument clamping, one output format — lives in the package `__init__`. |
+| **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, one scraped page. What they *do* share is split by job into `fetch`, `feeds`, `posting` and `relevance`, and a platform that hosts many companies (Greenhouse, Ashby) is one `HostedBoard` rather than one module each. |
 | **The digest derives its agents** | `tailor_with_resume` is the marker, so a new job agent joins tomorrow's digest by existing. There is no second registry to keep in step. |
 | **Cost is measured, not guessed** | One `turn …` line per turn records latency, hops, and token usage — which is how we found that a trivial reply costs 14.5k input tokens. |
+| **Observability is a config, not a code path** | `GraphRunner.respond` hands its run config to `tracing.observed` and gets back either an instrumented one or the one it already had, so a traced turn and an untraced turn take the same path. Nothing else in the package imports Langfuse. |
 
 ## Invariants worth not breaking
 
@@ -234,6 +239,10 @@ first — most of them exist because the alternative broke something subtle.
   Slack user id, so each interactive agent needs its own database path.
 - **`settings` must not raise on import.** That is what keeps the package
   importable — and the suite runnable — without a `.env`.
+- **Monitoring never breaks a turn.** The Langfuse client, its import, and its
+  handler are built inside one `try` that logs and leaves tracing off; the
+  config `respond` traces with is a copy, so the checkpointer reads and the
+  `_give_up` repair stay outside the trace.
 
 ## How it is tested
 

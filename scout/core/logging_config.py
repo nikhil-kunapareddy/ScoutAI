@@ -16,9 +16,29 @@ from .paths import LOG_DIR
 LOGGER_NAME = "scout"
 
 # Third-party loggers that are noisy at INFO. Slack's socket-mode client logs
-# every routine reconnect, which would drown out our own lines. Their warnings
-# and errors still come through.
-_NOISY_LOGGERS = ("slack_bolt", "slack_sdk", "urllib3", "httpx", "httpcore", "anthropic")
+# every routine reconnect, and Langfuse's exporter logs every batch, which would
+# drown out our own lines. Their warnings and errors still come through — an
+# unreachable tracing backend is worth hearing about.
+_NOISY_LOGGERS = (
+    "slack_bolt",
+    "slack_sdk",
+    "urllib3",
+    "httpx",
+    "httpcore",
+    "anthropic",
+    "langfuse",
+    "opentelemetry",
+)
+
+
+def logger() -> logging.Logger:
+    """The package logger — what every module in ``scout`` writes to.
+
+    One function rather than ``logging.getLogger("scout")`` in nine modules, so
+    the name is declared once and the handlers ``configure_logging`` installs
+    always reach it.
+    """
+    return logging.getLogger(LOGGER_NAME)
 
 
 def configure_logging() -> logging.Logger:
@@ -42,7 +62,7 @@ def configure_logging() -> logging.Logger:
     )
     quiet_third_party_loggers()
 
-    return logging.getLogger(LOGGER_NAME)
+    return logger()
 
 
 def quiet_third_party_loggers() -> None:
@@ -57,5 +77,6 @@ def quiet_third_party_loggers() -> None:
 
     existing = list(logging.root.manager.loggerDict)
     for name in _NOISY_LOGGERS:
-        for target in [name] + [n for n in existing if n.startswith(f"{name}.")]:
+        children = [child for child in existing if child.startswith(f"{name}.")]
+        for target in [name, *children]:
             logging.getLogger(target).setLevel(logging.WARNING)

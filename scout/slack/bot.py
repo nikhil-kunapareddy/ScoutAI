@@ -8,7 +8,6 @@ resume-tailored pipeline take the same path.
 
 from __future__ import annotations
 
-import logging
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,10 +17,10 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from ..core import settings
 from ..core.agent import ConversationalAgent
-from ..core.logging_config import quiet_third_party_loggers
+from ..core.logging_config import logger, quiet_third_party_loggers
 from .formatting import split_message
 
-log = logging.getLogger("scout")
+log = logger()
 
 #: Cap on exception text echoed to the user, so a huge provider error doesn't
 #: become the whole reply.
@@ -46,7 +45,7 @@ class Command:
         primary, *aliases = self.names
         if not aliases:
             return f"`{primary}`"
-        return f"`{primary}` (or {', '.join(f'`{a}`' for a in aliases)})"
+        return f"`{primary}` (or {', '.join(f'`{alias}`' for alias in aliases)})"
 
 
 class SlackBot:
@@ -59,7 +58,9 @@ class SlackBot:
     def __init__(self, agent: ConversationalAgent) -> None:
         self._agent = agent
         self._commands = self._build_commands()
-        self._commands_by_name = {n: c for c in self._commands for n in c.names}
+        self._commands_by_name = {
+            name: command for command in self._commands for name in command.names
+        }
         self._app = self._build_app()
 
     # --- Commands -------------------------------------------------------
@@ -111,7 +112,7 @@ class SlackBot:
 
     def _show_help(self, _user: str) -> str:
         lines = ["*Commands:*"]
-        lines += [f"• {c.usage} — {c.help}" for c in self._commands]
+        lines += [f"• {command.usage} — {command.help}" for command in self._commands]
         return "\n".join(lines)
 
     def _try_command(self, user: str, text: str) -> str | None:

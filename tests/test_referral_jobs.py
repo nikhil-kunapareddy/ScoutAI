@@ -12,7 +12,10 @@ import pytest
 from scout.agents import get_spec
 from scout.core import referrals, settings
 from scout.tools import ToolRegistry, referral_jobs
-from scout.tools.jobs import JobPosting, ashby, directory, greenhouse
+from scout.tools.jobs import ashby, directory, greenhouse
+from scout.tools.jobs.posting import JobPosting
+
+from .conftest import registered_tools
 
 ALICE = {"configurable": {"thread_id": "U_ALICE"}}
 BOB = {"configurable": {"thread_id": "U_BOB"}}
@@ -249,10 +252,7 @@ def test_the_referral_window_can_only_search_within_the_list() -> None:
     an agent that can search anywhere *and* write the list eventually records a
     company it merely found.
     """
-    reg = ToolRegistry()
-    for module in get_spec("referral").tool_modules:
-        module.register(reg)
-    names = set(reg.names())
+    names = set(registered_tools(*get_spec("referral").tool_modules))
 
     assert "search_referral_jobs" in names
     assert not {name for name in names if name.startswith("search_")} - {

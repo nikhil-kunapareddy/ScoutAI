@@ -146,9 +146,29 @@ hard-coded number is worse than none. See [operations](operations.md).
 | `TOOL_REQUEST_TIMEOUT_SECONDS` | `30` | Job-board APIs and the one scraped page. |
 | `GEO_REQUEST_TIMEOUT_SECONDS` | `10` | `ip-api.com`, for `get_location`. |
 
-## Tracing (optional)
+## Langfuse (optional)
 
-Read by LangSmith itself, not by Scout — no code path looks at them:
+Traces every graph node, model call, and tool call, grouped by conversation.
+Read by Scout itself — [`scout/core/tracing.py`](../scout/core/tracing.py) is
+the only module that knows Langfuse exists.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LANGFUSE_PUBLIC_KEY` | — | `pk-lf-…`, from your project's **Settings → API keys**. |
+| `LANGFUSE_SECRET_KEY` | — | `sk-lf-…`. Both keys together are the switch: one alone leaves tracing off, and `scout doctor` warns that it did. |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | `https://us.cloud.langfuse.com`, or your own instance. **Region matters** — a US key pair does not authenticate against the EU host. `LANGFUSE_BASE_URL` is accepted too, and wins if both are set, because that is the order the SDK reads them in. |
+| `LANGFUSE_ENVIRONMENT` | — | Separates the deployed box from a laptop pointed at the same project. `LANGFUSE_TRACING_ENVIRONMENT`, the SDK's own name, is accepted too. |
+| `LANGFUSE_HIDE_CONTENT` | `false` | Masks prompts and completions, keeping the call tree, latencies, and token counts. |
+
+Traces carry prompts and completions, **including the résumé profile in the
+system prompt** — `LANGFUSE_HIDE_CONTENT` is the answer to that, and the
+counterpart of LangSmith's `HIDE_` pair below. See
+[operations](operations.md#tracing-with-langfuse).
+
+## LangSmith (optional)
+
+Read by LangSmith itself, not by Scout — no code path looks at them. It can run
+alongside Langfuse or instead of it:
 
 | Variable | Notes |
 |---|---|

@@ -6,6 +6,7 @@ per turn, tracing when you want the full picture, and an alert when a unit dies.
 - [The daily digest](#the-daily-digest)
 - [Turn metrics](#turn-metrics)
 - [Reading them back](#reading-them-back)
+- [Tracing with Langfuse](#tracing-with-langfuse)
 - [Tracing with LangSmith](#tracing-with-langsmith)
 - [Alerts](#alerts)
 - [When the bot goes quiet](#when-the-bot-goes-quiet)
@@ -78,11 +79,77 @@ Parsing is deliberately forgiving: a line that does not look like a turn is
 skipped rather than fatal, so this keeps working when the log format grows a
 field.
 
+## Tracing with Langfuse
+
+The `turn` line says what a turn cost. Langfuse says what it *did*: every graph
+node, model call and tool call, nested, with the prompts, the tool output, the
+token counts and the latencies attached. Set both keys and restart:
+
+```
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # or your own instance
+LANGFUSE_ENVIRONMENT=production            # tells the box from a laptop
+```
+
+The pair *is* the switch — one key alone leaves tracing off, and `scout doctor`
+warns rather than letting a half-filled `.env` read as "traced".
+
+One turn is one trace, rooted in a span Scout opens itself:
+
+```
+answer-slack-dm                     ← the trace: input = your message, output = the reply
+└─ parse_resume                        the résumé stage, once per thread
+│  ├─ ChatOllama          generation   model + token usage
+│  └─ get_resume_profile  tool
+└─ job_agent              agent        the job agent, as its own node in the agent graph
+   ├─ ChatOllama          generation
+   ├─ get_current_time    tool
+   ├─ search_netflix_jobs tool
+   └─ ChatOllama          generation   what it decided after the tools answered
+```
+
+| In Langfuse | Is |
+|---|---|
+| Trace name | `answer-slack-dm`, or `run-job-digest`. Deliberately free of the user, the agent, and the model: dashboards, saved views and judges target names, so anything per-run in one fragments all three |
+| Input / output | Your message, and the reply you were sent — including the "I got stuck" one. Not the graph's message list, which answers a different question |
+| Session | The checkpointer thread — so a user's turns line up in the order the bot replays them, and `digest:bigtech` is its own session |
+| User | The same id. A digest thread is not a person and is not dressed up as one |
+| Tags | The agent's display name, and `slack` or `digest` — the dimension worth comparing cost and latency across, since a digest turn sweeps every source on a raised hop limit |
+| Metadata | `scout_backend`, the backend the turn was *asked* for. It differs from the model on the generation exactly when the fallback rescued the turn |
+| Release | `scout.__version__`, which is the one thing a log line cannot tell you after a redeploy |
+| Environment | `LANGFUSE_ENVIRONMENT`, when set |
+
+Each model call is its own `generation`, interleaved with the `tool` calls it
+asked for, so you can see what the agent decided after each tool answered —
+rather than one generation wrapping the whole loop. The conditional edges
+(`tools_condition`, `_needs_profile`) are dropped on the way out: they carry no
+model call, no tool result, and Langfuse bills what it stores.
+
+Scout wires this up itself, in [`scout/core/tracing.py`](../scout/core/tracing.py)
+— the only module that knows Langfuse exists. Three things follow from how it is
+wired, and they are the ones worth trusting:
+
+- **A turn that cannot be traced still answers.** The client and the handler are
+  built inside one `try`; a failure is logged once and tracing stays off until
+  the process restarts.
+- **An unreachable Langfuse costs nothing.** Export is batched on a background
+  thread, so a turn does not wait for it. `scout digest` shuts the client down
+  on the way out — what Langfuse asks a short-lived process to do — which is the
+  one place a dead backend costs a couple of seconds, after the DM has already
+  been sent.
+- **The handler is built on the first traced turn, never at import**, so
+  `scout doctor`, `scout stats`, and the test suite start no exporter thread.
+
+Traces carry prompts and completions, **résumé profile included**.
+`LANGFUSE_HIDE_CONTENT=true` masks them and keeps the rest — the call tree, the
+latencies, and the token counts.
+
 ## Tracing with LangSmith
 
-For the full picture of a turn — every node, model call, and tool call, with the
-prompts and tool output attached — set these and restart. No code change;
-LangGraph instruments itself:
+LangSmith can run alongside Langfuse, or instead of it, and needs no code at
+all: LangGraph instruments itself when these are set. Set them and restart for
+the same picture of a turn, in the other tool:
 
 ```
 LANGSMITH_TRACING=true
@@ -90,9 +157,9 @@ LANGSMITH_API_KEY=lsv2_pt_...
 LANGSMITH_PROJECT=scout
 ```
 
-It complements the `turn` line rather than replacing it: the log line is the
-cheap always-on record, LangSmith is what you open when a digest returns
-something odd and you want to see which tool returned what.
+Both complement the `turn` line rather than replacing it: the log line is the
+cheap always-on record, a trace is what you open when a digest returns something
+odd and you want to see which tool returned what.
 
 Be aware it sends prompts and completions off the box, **résumé profile
 included**. `LANGSMITH_HIDE_INPUTS=true` and `LANGSMITH_HIDE_OUTPUTS=true` keep
@@ -131,6 +198,9 @@ Common outcomes:
   expired, or rate-limited, and every turn is being rescued by the fallback.
 - **Nothing in the log at all** — the websocket is gone but the process is
   alive. `systemctl restart scout@<agent>`.
+- **Turns are logged but no traces arrive** — `scout doctor` will say whether
+  both Langfuse keys are set; if they are, the export failure is logged by the
+  exporter itself, at `WARNING` and above.
 - **Two replies to every message** — two instances share one bot token.
 - **Your conversations with two agents are interleaved** — they share a
   `CHECKPOINT_DB`.

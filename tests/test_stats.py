@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
+
 import pytest
 
-from scout import alert
+from scout import alert, stats
 from scout.core import settings
-from scout.stats import parse, render, summarise
+from scout.stats import Totals, parse, render, summarise
 
 LINE = (
     '2026-09-14 03:00:00 INFO scout turn agent="BigTech Agent" thread=U1 '
@@ -89,3 +91,56 @@ def test_a_missing_journal_is_reported_not_raised(monkeypatch) -> None:
         alert.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("no journalctl"))
     )
     assert "could not read the journal" in alert.recent_log("scout@bigtech.service")
+
+
+def test_a_window_with_no_turns_has_no_timings() -> None:
+    empty = summarise([])
+    assert empty == {}
+    # And the accessors hold up on a bucket that never saw a turn.
+    assert Totals().median_seconds == 0.0
+    assert Totals().slowest == 0.0
+
+
+def test_an_unbalanced_quote_skips_the_line_rather_than_raising() -> None:
+    """A line truncated mid-quote by the journal must not stop the report."""
+    assert parse('turn agent="BigTech Agent thread=U1') is None
+
+
+def test_non_numeric_fields_count_as_zero() -> None:
+    """The format is written by us but read from a journal that can truncate."""
+    totals = summarise([LINE.replace("in_tokens=8123", "in_tokens=lots")
+                            .replace("seconds=12.4", "seconds=ages")])["BigTech Agent"]
+
+    assert totals.in_tokens == 0
+    assert totals.seconds == [0.0]
+
+
+def test_the_journal_is_queried_for_every_scout_unit(monkeypatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    class Result:
+        stdout = f"{LINE}\nunrelated\n"
+
+    def fake_run(command, **_kwargs):
+        seen["command"] = command
+        return Result()
+
+    monkeypatch.setattr(stats.subprocess, "run", fake_run)
+
+    assert stats.journal_lines(3) == [LINE, "unrelated"]
+    assert seen["command"][0] == "journalctl"
+    assert "-3d" in seen["command"]
+    assert seen["command"].count("-u") == 2  # the bots, and the digest
+
+
+def test_the_report_reads_the_journal_for_a_window(monkeypatch) -> None:
+    monkeypatch.setattr(stats, "journal_lines", lambda days: [LINE] * days)
+
+    assert "BigTech Agent" in stats.report(2)
+
+
+def test_a_dash_reads_the_lines_from_stdin(monkeypatch) -> None:
+    """`journalctl ... | scout stats -` is how it's read off the box."""
+    monkeypatch.setattr("sys.stdin", io.StringIO(LINE))
+
+    assert "BigTech Agent" in stats.report(7, "-")

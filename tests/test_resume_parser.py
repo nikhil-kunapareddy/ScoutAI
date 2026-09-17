@@ -13,7 +13,8 @@ from langchain_core.messages import AIMessage
 from scout.agents import resume_parser
 from scout.agents.resume_parser import CandidateProfile, parse_profile
 from scout.agents.resume_tailored import ResumeTailoredAgent
-from scout.core.agent import STUCK_REPLY, ConversationalAgent
+from scout.core.agent import ConversationalAgent
+from scout.core.runner import STUCK_REPLY
 
 from .conftest import calls_tool, texts
 
@@ -185,3 +186,21 @@ def test_both_stages_switch_backend_together(monkeypatch, chat_models, spec) -> 
 
     assert len(other.seen) == 2  # both the parse and the job turn went to "fallback"
     assert primary.seen == []
+
+
+def test_the_brief_carries_every_field_the_parser_filled() -> None:
+    """The brief is the whole hand-off — a field dropped here is a field the job
+    agent never sees."""
+    brief = CandidateProfile(
+        titles=["ML Engineer", "Applied Scientist"],
+        skills=["PyTorch", "Spark"],
+        keywords=["machine learning", "llm"],
+        seniority="mid",
+        summary="Two years on recommendation systems.",
+    ).to_search_brief()
+
+    assert "- Background: Two years on recommendation systems." in brief
+    assert "- Seniority: mid" in brief
+    assert "- Target titles: ML Engineer, Applied Scientist" in brief
+    assert "- Key skills: PyTorch, Spark" in brief
+    assert "- Search keywords: machine learning, llm" in brief

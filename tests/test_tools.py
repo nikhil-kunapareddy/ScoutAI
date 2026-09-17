@@ -8,7 +8,9 @@ failure has to be a sentence and never an exception.
 from __future__ import annotations
 
 import os
+import zipfile
 from datetime import datetime
+from pathlib import Path
 
 from scout.core import settings
 from scout.tools import build_registry, clock, location, resume
@@ -159,3 +161,29 @@ def test_the_resume_folder_can_be_moved(monkeypatch, tmp_path) -> None:
 
     assert resume.resume_dir() == elsewhere
     assert "relocated" in run(resume, "get_resume_profile")
+
+
+def test_a_folder_that_does_not_exist_holds_no_resumes(tmp_path) -> None:
+    """``scout doctor`` asks this of a path the user may not have created yet."""
+    assert resume.resumes_in(tmp_path / "nowhere") == []
+
+
+def test_a_docx_resume_is_read_as_text(monkeypatch, tmp_path) -> None:
+    _write_docx(tmp_path / "resume.docx", "Sai — ML Engineer at Northeastern")
+    monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
+
+    reply = run(resume, "get_resume_profile")
+
+    assert "Resume file: resume.docx" in reply
+    assert "ML Engineer at Northeastern" in reply
+
+
+def _write_docx(path: Path, text: str) -> None:
+    """The smallest .docx docx2txt will read: one paragraph in a zip."""
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", document)

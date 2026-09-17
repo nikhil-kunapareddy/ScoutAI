@@ -43,9 +43,12 @@ Design choices that follow from that:
 
 ## Things to know before you deploy
 
-- **LangSmith tracing sends prompts and completions off your machine**,
-  including the résumé profile in the system prompt. `LANGSMITH_HIDE_INPUTS`
-  and `LANGSMITH_HIDE_OUTPUTS` keep the traces without the content.
+- **Tracing sends prompts and completions off your machine**, including the
+  résumé profile in the system prompt. Both backends have a way to keep the
+  call tree without the content: `LANGFUSE_HIDE_CONTENT` for Langfuse,
+  `LANGSMITH_HIDE_INPUTS` and `LANGSMITH_HIDE_OUTPUTS` for LangSmith. Both are
+  off unless configured — Langfuse needs its key pair, LangSmith needs
+  `LANGSMITH_TRACING`.
 - **`get_location` shares the host's public IP** with `ip-api.com`, over plain
   HTTP on the free tier. Drop `location` from an agent's `tool_modules` if that
   is not a trade you want.

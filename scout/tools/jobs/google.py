@@ -8,22 +8,22 @@ from __future__ import annotations
 
 import re
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
+from . import fetch
+from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
-    is_ai_ml_role,
+    merge_queries,
     render_postings,
-    search_queries,
 )
+from .relevance import is_ai_ml_role, search_queries
 
 SEARCH_URL = "https://www.google.com/about/careers/applications/jobs/results/"
 JOB_BASE_URL = "https://www.google.com/about/careers/applications/"
+ORGANIZATION = "Google"
 
 # Shown instead of a date, so the model doesn't invent one.
 NO_DATE_LABEL = "not published by Google"
@@ -51,9 +51,9 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return "No relevant Google roles found right now. Try again later."
+            return f"No relevant {ORGANIZATION} roles found right now. Try again later."
         return render_postings(
-            "*Latest Google AI/ML roles (most recent first) — {count} found:*",
+            f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
             footer="_Google doesn't publish posting dates; roles are listed newest-first._",
         )
@@ -64,48 +64,42 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
 
     The postings rather than the rendered text, so a caller searching several
     companies at once can merge and count them — see ``jobs/directory.py``.
+
+    Never re-sorted: without dates, the source's own ordering is the only
+    recency signal available, and ``merge_queries`` preserves it.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+    found = merge_queries(search_queries(keywords), _postings_for)
+    return None if found is None else found[:limit]
 
-    # Insertion-ordered and never re-sorted: without dates, the source's own
-    # ordering is the only recency signal available.
-    found: dict[str, JobPosting] = {}
-    reached = False
-    for query in search_queries(keywords):
-        html = _fetch_html(query)
-        if html is None:
-            continue
-        reached = True
-        for href, raw_title in _JOB_RE.findall(html):
-            title = raw_title.strip()
-            job_id = href.split("/")[2].split("-")[0]  # jobs/results/{id}-{slug}
-            if job_id in found or not is_ai_ml_role(title):
-                continue
-            found[job_id] = JobPosting(
-                title=title,
-                organization="Google",
-                url=JOB_BASE_URL + href,
-                posted_label=NO_DATE_LABEL,
-            )
 
-    # Every query failing means the site is down, which a caller may need to
-    # report differently from "Google has nothing".
-    if not reached:
+def _postings_for(query: str) -> QueryResults:
+    """One results page, as (job id, posting) pairs, or None if unreachable."""
+    html = fetch.get_text(SEARCH_URL, _params(query))
+    if html is None:
         return None
-    return list(found.values())[:limit]
+    found = []
+    for href, raw_title in _JOB_RE.findall(html):
+        title = raw_title.strip()
+        if is_ai_ml_role(title):
+            found.append((_job_id(href), _to_posting(href, title)))
+    return found
 
 
-def _fetch_html(query: str) -> str | None:
-    """Fetch one results page. Returns None if Google is unreachable, so the
-    remaining profile queries can still produce an answer."""
-    try:
-        resp = requests.get(
-            SEARCH_URL,
-            params={"q": query, "location": "United States", "sort_by": "date"},
-            headers={"User-Agent": settings.TOOL_USER_AGENT},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return resp.text
-    except Exception:
-        return None
+def _job_id(href: str) -> str:
+    """The numeric id in ``jobs/results/{id}-{slug}``, for de-duping queries."""
+    return href.split("/")[2].split("-")[0]
+
+
+def _params(query: str) -> dict[str, str]:
+    return {"q": query, "location": "United States", "sort_by": "date"}
+
+
+def _to_posting(href: str, title: str) -> JobPosting:
+    """Convert one "Learn more" anchor."""
+    return JobPosting(
+        title=title,
+        organization=ORGANIZATION,
+        url=JOB_BASE_URL + href,
+        posted_label=NO_DATE_LABEL,
+    )

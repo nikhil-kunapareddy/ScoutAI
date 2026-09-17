@@ -20,24 +20,18 @@ Opting in is one flag on an ``AgentSpec``: ``tailor_with_resume=True``.
 
 from __future__ import annotations
 
-import logging
-
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from ..core.agent import (
-    AgentSpec,
-    AgentState,
-    GraphRunner,
-    agent_tools,
-    build_agent_graph,
-)
+from ..core.agent import AgentSpec, AgentState, agent_tools, build_agent_graph
 from ..core.checkpoints import build_checkpointer
+from ..core.logging_config import logger
+from ..core.runner import GraphRunner
 from .resume_parser import SPEC as RESUME_SPEC
 from .resume_parser import parse_profile
 
-log = logging.getLogger("scout")
+log = logger()
 
 #: What we ask the parser for; its system prompt does the real work.
 _PARSE_REQUEST = "Extract my candidate profile."

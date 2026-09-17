@@ -14,41 +14,46 @@ One module per source under `scout/tools/jobs/`. The platforms differ too much
 to share an implementation — a JSON search API is nothing like an RSS feed — so
 the rule is: **fetch and parse your own way, render like everyone else.**
 
-Reuse from the package `__init__`:
+Reuse the shared parts, importing each from the module that owns it:
 
-| Helper | What it is for |
-|---|---|
-| `JobPosting` | The normalised posting every source produces |
-| `render_postings(header, postings)` | The one Slack output format |
-| `is_ai_ml_role(title)` | The AI/ML title filter, by phrase or standalone token |
-| `matches_keywords(title, terms)` | Title filtering where the source has no server-side search |
-| `search_queries(keywords)` | The caller's phrase, or the profile's default queries |
-| `clamp_int(value, default, min, max)` | Bounds a schema can't express (`days=0`, `limit=999`) |
-| `json_rows(payload, key)` | The rows under a key, or `[]` if the board answered with something else |
-| `take_newest(postings, limit)` | Sort newest-first and cut |
-| `DEFAULT_LIMIT`, `MAX_LIMIT` | Shared result-count bounds |
+| From | Helper | What it is for |
+|---|---|---|
+| `fetch` | `get_rows(url, key, params)` | GET a JSON board: the rows, or `None` if it can't be reached |
+| `fetch` | `get_text(url, params)` | The same for a page or an RSS feed |
+| `fetch` | `post_rows(url, key, payload)` | The same where the query goes in the body (Workday) |
+| `feeds` | `items(feed)`, `tag_text(item, tag)` | Reading an RSS feed |
+| `posting` | `JobPosting` | The normalised posting every source produces |
+| `posting` | `render_postings(header, postings)` | The one Slack output format |
+| `posting` | `merge_queries(queries, postings_for)` | Run several queries at one source and de-dupe |
+| `posting` | `take_newest(postings, limit)` | Sort newest-first and cut |
+| `posting` | `clamp_int(value, default, min, max)` | Bounds a schema can't express (`days=0`, `limit=999`) |
+| `posting` | `DEFAULT_LIMIT`, `MAX_LIMIT` | Shared result-count bounds |
+| `relevance` | `is_ai_ml_role(title)` | The AI/ML title filter, by phrase or standalone token |
+| `relevance` | `matches_keywords(title, terms)` | Title filtering where the source has no server-side search |
+| `relevance` | `search_queries(keywords)` | The caller's phrase, or the profile's default queries |
+
+`fetch` is also the one place the suite stubs, so a source that uses it is
+testable without touching `requests` at all.
 
 ```python
 """Acme job search, via the public JSON endpoint acme.com/careers uses."""
 
 from __future__ import annotations
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
+from . import fetch
+from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    is_ai_ml_role,
-    json_rows,
     render_postings,
     take_newest,
 )
+from .relevance import is_ai_ml_role
 
 SEARCH_URL = "https://acme.com/api/jobs"
+ORGANIZATION = "Acme"
 
 
 def register(reg: ToolRegistry) -> None:
@@ -60,45 +65,52 @@ def register(reg: ToolRegistry) -> None:
             keywords: Optional phrase to narrow titles (e.g. "machine learning").
             limit: Maximum number of roles to return.
         """
-        limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-        rows = _fetch(keywords)
-        if rows is None:
-            return "Couldn't reach Acme's careers board right now. Try again later."
-
-        postings = [
-            JobPosting(title=title, organization="Acme", url=row.get("url", ""))
-            for row in rows
-            if is_ai_ml_role(title := (row.get("title") or "").strip())
-        ]
-        postings = take_newest(postings, limit)
+        postings = search(keywords, limit)
+        if postings is None:
+            return f"Couldn't reach {ORGANIZATION}'s careers board right now. Try again later."
         if not postings:
-            return "No relevant Acme roles found right now. Try adjusting your keywords."
-        return render_postings("*Latest Acme AI/ML roles — {count} found:*", postings)
-
-
-def _fetch(keywords: str) -> list[dict] | None:
-    """The board's rows, or None if it can't be reached.
-
-    None and [] mean different things to the user: "the board is down" versus
-    "the board has nothing matching".
-    """
-    try:
-        resp = requests.get(
-            SEARCH_URL,
-            params={"q": keywords},
-            headers={"User-Agent": settings.TOOL_USER_AGENT},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
+            return f"No relevant {ORGANIZATION} roles found right now. Try adjusting your keywords."
+        return render_postings(
+            f"*Latest {ORGANIZATION} AI/ML roles — {{count}} found:*", postings
         )
-        resp.raise_for_status()
-        return json_rows(resp.json(), "jobs")
-    except Exception:
+
+
+def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
+    """Acme's current AI/ML openings, or None if the board can't be reached.
+
+    The postings rather than the rendered text, so a caller searching several
+    companies at once can merge and count them — see ``jobs/directory.py``.
+    """
+    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+
+    rows = fetch.get_rows(SEARCH_URL, "jobs", {"q": keywords})
+    if rows is None:
         return None
+
+    postings = [
+        posting for row in rows if (posting := _to_posting(row)) is not None
+    ]
+    return take_newest(postings, limit)
+
+
+def _to_posting(row: dict) -> JobPosting | None:
+    """Convert one board row, or None if it should be skipped."""
+    title = (row.get("title") or "").strip()
+    if not is_ai_ml_role(title):
+        return None
+    return JobPosting(title=title, organization=ORGANIZATION, url=row.get("url", ""))
 ```
+
+Note the two halves. The registered tool returns Slack text; `search` returns the
+postings and matches `Searcher`, which is what lets the Referral Window search
+this source alongside seven others. `None` from `search` means *unreachable* and
+is never the same answer as `[]`.
 
 Then add the module to an agent's `tool_modules` (`scout/agents/bigtech.py`),
 and a test in `tests/test_job_sources.py` using `call_tool` and `FakeRequests`:
 one for the happy path, one for filtering, and one for the source being down.
+Add it to `SOURCES` at the bottom of that file too — that table is what checks
+every source tells "unreachable" from "nothing open".
 
 Two rules worth repeating, because both are about the model's experience:
 
@@ -107,9 +119,13 @@ Two rules worth repeating, because both are about the model's experience:
 - **`None` and `[]` are different answers.** "I couldn't reach it" and "there is
   nothing there" lead the model to different next moves.
 
-If the company is hosted on **Greenhouse**, you do not need a module at all —
-add a line to `BOARDS` in `scout/tools/jobs/greenhouse.py`. That is one
-platform, not one source.
+If the company is hosted on **Greenhouse or Ashby**, you do not need a module at
+all — add a line to `BOARDS` in `scout/tools/jobs/greenhouse.py` or `ashby.py`.
+That is one platform, not one source, and the line reaches `directory.py` on its
+own. A *new* multi-company platform is a `HostedBoard`: give it the board URL,
+the JSON key its openings sit under, its `BOARDS`, and a function that reads one
+row — the slug lookup, the fetch, and the three replies a board tool owes (unknown
+company, board down, board empty) are already written.
 
 ## A tool
 
@@ -246,4 +262,4 @@ make check
 ```
 
 ruff, mypy, and the suite with coverage — the same four commands CI runs. And
-see [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest.
+see [CONTRIBUTING.md](CONTRIBUTING.md) for the rest.

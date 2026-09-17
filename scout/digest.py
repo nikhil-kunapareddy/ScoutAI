@@ -17,16 +17,15 @@ return prose, not the structured ``JobPosting`` objects their tools built.
 
 from __future__ import annotations
 
-import logging
 from datetime import date
 
 from .agents import AGENTS, build_agent
-from .core import settings
+from .core import settings, tracing
 from .core.agent import AgentSpec
-from .core.logging_config import configure_logging
+from .core.logging_config import configure_logging, logger
 from .slack.notify import post_dm
 
-log = logging.getLogger("scout")
+log = logger()
 
 #: One thread per agent, never a real Slack user id, so it cannot collide with
 #: one. Kept stable across runs so the cached profile and the record of what was
@@ -82,6 +81,11 @@ def main() -> None:
     configure_logging()
     settings.require_digest_config()
     post_dm(settings.DIGEST_SLACK_USER, run_digest())
+    # Traces are exported in batches on a background thread, and this process is
+    # about to exit — which is the case Langfuse asks a short-lived application
+    # to shut down for, rather than leave to the interpreter. It also puts any
+    # complaint about sending them inside this run's own journal window.
+    tracing.shutdown()
 
 
 if __name__ == "__main__":

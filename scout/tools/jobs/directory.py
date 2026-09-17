@@ -23,7 +23,6 @@ from functools import partial
 from typing import NamedTuple
 
 from . import (
-    Searcher,
     amazon,
     ashby,
     boston_university,
@@ -33,6 +32,7 @@ from . import (
     netflix,
     northeastern,
 )
+from .posting import Searcher
 
 #: How far back the by-company search looks at sources that take a date window.
 #: The Amazon tool defaults to the last 24h, which is right for "what is new
@@ -62,11 +62,11 @@ SOURCES: dict[str, CompanySource] = {
         boston_university.ORGANIZATION, boston_university.search
     ),
     **{
-        slug: CompanySource(name, partial(greenhouse.search, slug))
+        slug: CompanySource(name, greenhouse.BOARD.searcher(slug))
         for slug, name in greenhouse.BOARDS.items()
     },
     **{
-        slug: CompanySource(name, partial(ashby.search, slug))
+        slug: CompanySource(name, ashby.BOARD.searcher(slug))
         for slug, name in ashby.BOARDS.items()
     },
 }

@@ -21,8 +21,8 @@ from langchain_core.runnables import RunnableConfig
 
 from ..core import referrals
 from ..core.referrals import Referral, ReferralStoreError
-from .jobs import JobPosting, clamp_int, render_postings
 from .jobs.directory import CompanySource, resolve
+from .jobs.posting import JobPosting, clamp_int, render_postings
 from .registry import ToolRegistry
 
 DEFAULT_PER_COMPANY = 5
@@ -115,9 +115,11 @@ def _render(searched: list[Outcome], uncovered: list[str]) -> str:
 
     notes = []
     if reached:
-        counts = ", ".join(f"{o.company} ({len(o.postings or [])})" for o in reached)
+        counts = ", ".join(
+            f"{outcome.company} ({len(outcome.postings or [])})" for outcome in reached
+        )
         notes.append(f"_Searched: {counts}._")
-    if unreachable := [o.company for o in searched if o.postings is None]:
+    if unreachable := [out.company for out in searched if out.postings is None]:
         notes.append(f"_Couldn't reach right now: {', '.join(unreachable)} — "
                      "try again later._")
     if uncovered:

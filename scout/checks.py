@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 
 from .agents import AGENTS
-from .core import models, referrals, settings
+from .core import models, referrals, settings, tracing
 from .core.paths import PROJECT_ROOT, under_root
 from .tools.resume import RESUME_EXTENSIONS, resume_dir, resumes_in
 
@@ -86,7 +86,8 @@ def run() -> Report:
             _state(),
             _referrals(),
             _digest(),
-            _tracing(),
+            _langfuse(),
+            _langsmith(),
         ]
     )
 
@@ -118,14 +119,9 @@ def _env_files() -> Check:
 
 
 def _slack() -> Check:
-    missing = [
-        name
-        for name, value in (
-            ("SLACK_BOT_TOKEN", settings.SLACK_BOT_TOKEN),
-            ("SLACK_APP_TOKEN", settings.SLACK_APP_TOKEN),
-        )
-        if not value
-    ]
+    # The same list the bot refuses to start without, so this line and that
+    # failure cannot drift apart. See settings.require_slack_credentials.
+    missing = settings.missing_for(settings.BOT_REQUIRES)
     if missing:
         return Check(
             "slack",
@@ -188,7 +184,7 @@ def _resume() -> Check:
             f"{missing} {directory} — searches run untailored",
             WARN,
         )
-    newest = max(resumes, key=lambda p: p.stat().st_mtime)
+    newest = max(resumes, key=lambda path: path.stat().st_mtime)
     extra = f" (+{len(resumes) - 1} more, newest wins)" if len(resumes) > 1 else ""
     return Check("resume", f"{directory.name}/{newest.name}{extra}")
 
@@ -223,10 +219,38 @@ def _digest() -> Check:
     )
 
 
-def _tracing() -> Check:
+def _langfuse() -> Check:
+    """Whether Scout will trace its own turns — the keys, not a ping.
+
+    ``tracing.REQUIRES`` is the same pair the runtime switches on, so this line
+    and what actually happens cannot drift apart.
+    """
+    missing = settings.missing_for(tracing.REQUIRES)
+    if len(missing) == 1:
+        # Half a pair is a typo, not a choice — and it is the one state that
+        # reads as "on" from the .env while tracing nothing.
+        return Check(
+            "langfuse",
+            f"{missing[0]} is missing, so tracing stays off",
+            WARN,
+        )
+    if missing:
+        return Check(
+            "langfuse", f"off (set {' and '.join(tracing.REQUIRES)} to trace turns)"
+        )
+
+    detail = f"tracing to {settings.LANGFUSE_HOST}"
+    if settings.LANGFUSE_ENVIRONMENT:
+        detail += f", environment {settings.LANGFUSE_ENVIRONMENT!r}"
+    detail += " (content masked)" if settings.LANGFUSE_HIDE_CONTENT else " (prompts included)"
+    return Check("langfuse", detail)
+
+
+def _langsmith() -> Check:
     # Read from the environment, not settings: LangSmith reads these itself, so
-    # the platform never needs them and does not carry them.
+    # the platform never needs them and does not carry them. Langfuse is the
+    # other way round — see _langfuse — and the two can run at once.
     if os.environ.get("LANGSMITH_TRACING", "").lower() in {"true", "1"}:
         project = os.environ.get("LANGSMITH_PROJECT", "default")
-        return Check("tracing", f"LangSmith on, project {project!r}")
-    return Check("tracing", "off (set LANGSMITH_TRACING=true to trace turns)")
+        return Check("langsmith", f"on, project {project!r}")
+    return Check("langsmith", "off (set LANGSMITH_TRACING=true to trace turns)")
