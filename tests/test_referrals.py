@@ -10,8 +10,10 @@ from scout.agents import AGENTS, get_spec
 from scout.core import referrals, settings
 from scout.core.referrals import Referral, ReferralStoreError
 from scout.digest import job_agents
-from scout.tools import ToolRegistry, referrals_read
 from scout.tools import referrals as referral_tools
+from scout.tools import referrals_read
+
+from .conftest import registered_tools
 
 ALICE = {"configurable": {"thread_id": "U_ALICE"}}
 BOB = {"configurable": {"thread_id": "U_BOB"}}
@@ -23,12 +25,6 @@ def store(monkeypatch, tmp_path):
     path = tmp_path / "referrals.json"
     monkeypatch.setattr(settings, "REFERRALS_FILE", str(path))
     return path
-
-
-def tools(module) -> dict:
-    reg = ToolRegistry()
-    module.register(reg)
-    return {t.name: t for t in reg.tools}
 
 
 # --- The store ------------------------------------------------------------
@@ -151,7 +147,7 @@ def test_a_missing_config_does_not_explode() -> None:
 
 
 def test_tools_act_on_the_calling_user_only() -> None:
-    t = tools(referral_tools)
+    t = registered_tools(referral_tools)
     t["add_referral"].invoke({"company": "Stripe"}, config=ALICE)
 
     assert "Stripe" in t["list_referrals"].invoke({}, config=ALICE)
@@ -160,14 +156,14 @@ def test_tools_act_on_the_calling_user_only() -> None:
 
 def test_the_user_id_is_not_in_the_schema_the_model_sees() -> None:
     """The injected config is what keeps the model from naming a user at all."""
-    t = tools(referral_tools)
+    t = registered_tools(referral_tools)
 
     assert set(t["add_referral"].args) == {"company", "contact", "note"}
     assert t["list_referrals"].args == {}
 
 
 def test_removing_something_unlisted_says_what_is_listed() -> None:
-    t = tools(referral_tools)
+    t = registered_tools(referral_tools)
     t["add_referral"].invoke({"company": "Stripe"}, config=ALICE)
 
     reply = t["remove_referral"].invoke({"company": "Netflix"}, config=ALICE)
@@ -179,7 +175,7 @@ def test_removing_something_unlisted_says_what_is_listed() -> None:
 def test_a_broken_store_is_reported_not_raised(store) -> None:
     """Tools answer with a sentence; raising would abandon the tool call."""
     store.write_text("{not json")
-    t = tools(referral_tools)
+    t = registered_tools(referral_tools)
 
     for name, args in [("list_referrals", {}), ("add_referral", {"company": "X"}),
                        ("remove_referral", {"company": "X"})]:
@@ -192,32 +188,26 @@ def test_a_broken_store_is_reported_not_raised(store) -> None:
 
 def test_job_agents_get_the_read_only_view() -> None:
     """A searching agent must not decide to record a referral on its own."""
-    assert set(tools(referrals_read)) == {"list_referrals"}
+    assert set(registered_tools(referrals_read)) == {"list_referrals"}
 
     for key in ("bigtech", "edu"):
-        names = set()
-        reg = ToolRegistry()
-        for module in get_spec(key).tool_modules:
-            module.register(reg)
-            names = set(reg.names())
+        names = set(registered_tools(*get_spec(key).tool_modules))
         assert "list_referrals" in names, key
         assert "add_referral" not in names, key
         assert "remove_referral" not in names, key
 
 
 def test_the_referral_window_owns_the_writes() -> None:
-    reg = ToolRegistry()
-    for module in get_spec("referral").tool_modules:
-        module.register(reg)
+    names = set(registered_tools(*get_spec("referral").tool_modules))
 
-    assert {"add_referral", "remove_referral", "list_referrals"} <= set(reg.names())
+    assert {"add_referral", "remove_referral", "list_referrals"} <= names
 
 
 def test_both_views_render_a_list_identically() -> None:
     referrals.add("U_ALICE", "Stripe", contact="ex-teammate")
 
-    assert (tools(referral_tools)["list_referrals"].invoke({}, config=ALICE)
-            == tools(referrals_read)["list_referrals"].invoke({}, config=ALICE))
+    assert (registered_tools(referral_tools)["list_referrals"].invoke({}, config=ALICE)
+            == registered_tools(referrals_read)["list_referrals"].invoke({}, config=ALICE))
 
 
 # --- Where it does and does not belong ------------------------------------
@@ -232,3 +222,42 @@ def test_the_referral_window_is_not_a_digest_agent() -> None:
 
 def test_referral_renders_without_optional_fields() -> None:
     assert Referral(company="Stripe").render() == "*Stripe*"
+
+
+def test_a_note_is_rendered_alongside_the_contact() -> None:
+    line = Referral("Stripe", contact="ex-teammate", note="former manager",
+                    added="2026-09-15").render()
+
+    assert line == "*Stripe* — ex-teammate (former manager) · added 2026-09-15"
+
+
+def test_removing_from_an_empty_list_says_it_is_empty() -> None:
+    reply = registered_tools(referral_tools)["remove_referral"].invoke(
+        {"company": "Stripe"}, config=ALICE
+    )
+
+    assert "isn't on the list — it's empty" in reply
+
+
+def test_removing_something_unlisted_names_what_is_listed() -> None:
+    """Naming the list back is what lets the model correct a misheard company
+    instead of telling the user they have no referrals."""
+    referrals.add("U_ALICE", "Stripe")
+    referrals.add("U_ALICE", "Databricks")
+
+    reply = registered_tools(referral_tools)["remove_referral"].invoke(
+        {"company": "Stripey"}, config=ALICE
+    )
+
+    assert "Currently listed: Stripe, Databricks" in reply
+
+
+def test_removing_a_listed_company_confirms_which_one_went() -> None:
+    referrals.add("U_ALICE", "Stripe")
+
+    reply = registered_tools(referral_tools)["remove_referral"].invoke(
+        {"company": "stripe"}, config=ALICE  # the user's casing, not the list's
+    )
+
+    assert reply == "Removed *Stripe* from the referral list."
+    assert referrals.list_for("U_ALICE") == []

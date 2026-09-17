@@ -14,7 +14,6 @@ parsed once rather than once per restart.
 
 from __future__ import annotations
 
-import logging
 import sqlite3
 from pathlib import Path
 
@@ -23,9 +22,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from . import settings
+from .logging_config import logger
 from .paths import under_root
 
-log = logging.getLogger("scout")
+log = logger()
 
 #: How long to wait for a concurrent writer before raising "database is locked".
 #: Generous because a turn holds no transaction open while the model thinks — the

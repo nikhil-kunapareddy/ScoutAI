@@ -16,14 +16,14 @@ always reported, so the spend is derivable after the fact either way.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from . import settings
+from .logging_config import logger
 
-log = logging.getLogger("scout")
+log = logger()
 
 #: Turn outcomes worth telling apart when reading the log back.
 OK = "ok"
@@ -96,7 +96,7 @@ def measure(
             counted.
     """
     added = _added_this_turn(messages)
-    replies = [m for m in added if isinstance(m, AIMessage)]
+    replies = [message for message in added if isinstance(message, AIMessage)]
     return TurnMetrics(
         agent=agent,
         thread=thread,
@@ -105,9 +105,9 @@ def measure(
         outcome=outcome,
         seconds=seconds,
         model_calls=len(replies),
-        tool_calls=sum(len(m.tool_calls or []) for m in replies),
-        input_tokens=sum(_usage(m, "input_tokens") for m in replies),
-        output_tokens=sum(_usage(m, "output_tokens") for m in replies),
+        tool_calls=sum(len(reply.tool_calls or []) for reply in replies),
+        input_tokens=sum(_usage(reply, "input_tokens") for reply in replies),
+        output_tokens=sum(_usage(reply, "output_tokens") for reply in replies),
     )
 
 
@@ -118,9 +118,9 @@ def _added_this_turn(messages: list[BaseMessage]) -> list[BaseMessage]:
     turn, so the last human message marks the boundary — no need to read the
     checkpoint again to compare lengths.
     """
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], HumanMessage):
-            return messages[i:]
+    for index in reversed(range(len(messages))):
+        if isinstance(messages[index], HumanMessage):
+            return messages[index:]
     return messages
 
 

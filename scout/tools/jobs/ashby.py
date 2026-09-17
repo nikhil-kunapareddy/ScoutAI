@@ -2,12 +2,11 @@
 
 Ashby publishes each customer's board at
 ``api.ashbyhq.com/posting-api/job-board/{slug}``, so adding a company is a line
-in ``BOARDS``. Sharing an implementation is right here for the same reason it is
-in ``greenhouse.py``: this is one platform, not one job source.
+in ``BOARDS``. The plumbing is ``HostedBoard``, shared with Greenhouse; what is
+here is Ashby's own: where the boards live, and how to read a row.
 
-The API does no filtering, so we fetch the board and filter here — AI/ML
-relevance, US location, newest-first. Unlike Greenhouse, the country comes back
-structured, so that filter is exact rather than a reading of free text.
+Unlike Greenhouse, the country comes back structured, so that filter is exact
+rather than a reading of free text.
 
 Note this is the *posting* API, not the company's careers page: whoop.com and
 the like sit behind bot protection, while this answers plain JSON.
@@ -17,21 +16,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
-    DEFAULT_LIMIT,
-    MAX_LIMIT,
-    JobPosting,
-    clamp_int,
-    is_ai_ml_role,
-    json_rows,
-    matches_keywords,
-    render_postings,
-    take_newest,
-)
+from .hosted_board import HostedBoard
+from .posting import DEFAULT_LIMIT, JobPosting
+from .relevance import is_ai_ml_role, matches_keywords
 
 BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/{slug}"
 
@@ -41,82 +29,6 @@ BOARDS = {
 }
 
 US = "United States"
-
-
-def register(reg: ToolRegistry) -> None:
-    @reg.tool
-    def search_ashby_jobs(
-        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
-    ) -> str:
-        """Search a company's Ashby careers board for recent US AI/ML job
-        openings and return title, date posted, and link.
-
-        Args:
-            company: Which company to search. Supported: whoop.
-            keywords: Optional phrase to narrow titles (e.g. "machine learning").
-                If empty, returns all AI/ML-relevant roles.
-            limit: Maximum number of roles to return.
-        """
-        slug = (company or "").strip().lower()
-        if slug not in BOARDS:
-            supported = ", ".join(sorted(BOARDS))
-            return f"Unknown company '{company}'. Supported Ashby companies: {supported}."
-
-        name = BOARDS[slug]
-        postings = search(slug, keywords, limit)
-        if postings is None:
-            return f"Couldn't reach {name}'s careers board right now. Try again later."
-        if not postings:
-            return (f"No relevant {name} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
-            f"*Latest {name} AI/ML roles (most recent first) — {{count}} found:*", postings
-        )
-
-
-def search(
-    company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
-) -> list[JobPosting] | None:
-    """One board's AI/ML openings, newest first, or None if it can't be reached.
-
-    ``company`` is a board slug — a key of ``BOARDS``; an unknown one finds no
-    board and reads as unreachable. The postings rather than the rendered text,
-    so a caller searching several companies at once can merge and count them —
-    see ``jobs/directory.py``.
-    """
-    slug = (company or "").strip().lower()
-    limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-
-    jobs = _fetch_board(slug)
-    if jobs is None:
-        return None
-
-    name = BOARDS.get(slug, company)
-    terms = keywords.lower().split()
-    postings = [
-        posting
-        for job in jobs
-        if (posting := _to_posting(job, name, terms)) is not None
-    ]
-    return take_newest(postings, limit)
-
-
-def _fetch_board(slug: str) -> list[dict] | None:
-    """Fetch a board's full job list, or None if it can't be reached.
-
-    None and [] mean different things to the user: "the board is down" versus
-    "the board has nothing matching".
-    """
-    try:
-        resp = requests.get(
-            BOARD_URL.format(slug=slug),
-            headers={"User-Agent": settings.TOOL_USER_AGENT, "Accept": "application/json"},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return json_rows(resp.json(), "jobs")
-    except Exception:
-        return None
 
 
 def _to_posting(job: dict, organization: str, terms: list[str]) -> JobPosting | None:
@@ -160,3 +72,32 @@ def _parse_published(raw: object) -> datetime | None:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+BOARD = HostedBoard(
+    platform="Ashby",
+    board_url=BOARD_URL,
+    rows_key="jobs",
+    boards=BOARDS,
+    read_row=_to_posting,
+)
+
+#: This source's ``Searcher``, taking the board slug first. See ``directory.py``.
+search = BOARD.search
+
+
+def register(reg: ToolRegistry) -> None:
+    @reg.tool
+    def search_ashby_jobs(
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
+    ) -> str:
+        """Search a company's Ashby careers board for recent US AI/ML job
+        openings and return title, date posted, and link.
+
+        Args:
+            company: Which company to search. Supported: whoop.
+            keywords: Optional phrase to narrow titles (e.g. "machine learning").
+                If empty, returns all AI/ML-relevant roles.
+            limit: Maximum number of roles to return.
+        """
+        return BOARD.answer(company, keywords, limit)

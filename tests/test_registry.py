@@ -11,8 +11,9 @@ import pytest
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
-from scout.tools import build_registry
 from scout.tools.registry import ToolRegistry
+
+from .conftest import registered_tools
 
 
 def schema_for(reg: ToolRegistry, name: str) -> dict:
@@ -123,5 +124,4 @@ def test_arguments_are_validated_before_the_tool_runs() -> None:
 
 
 def test_build_registry_runs_each_module_in_order(echo_tool_module) -> None:
-    reg = build_registry([echo_tool_module])
-    assert reg.names() == ["echo", "explode"]
+    assert list(registered_tools(echo_tool_module)) == ["echo", "explode"]

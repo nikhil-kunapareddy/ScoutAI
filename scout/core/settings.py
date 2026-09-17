@@ -13,6 +13,7 @@ checked at start-up by ``require_slack_credentials()``.
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -49,6 +50,32 @@ def _env_float(name: str, default: float) -> float:
         return float(os.environ[name])
     except (KeyError, ValueError):
         return default
+
+
+def _env_any(names: Sequence[str], default: str) -> str:
+    """The first of ``names`` that is set and non-empty, else ``default``.
+
+    For settings an SDK also reads itself, under more than one name. Reading the
+    same names it does, in the same order, is what keeps ``scout doctor`` from
+    reporting one value while the library uses another.
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a flag from the environment: ``true``/``1``/``yes``/``on``, any case.
+
+    Anything else set is false, which is the readable outcome for a typo in a
+    switch — ``HIDE_CONTENT=ture`` must not read as "hide".
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "1", "yes", "on"}
 
 
 # --- Slack ---
@@ -125,6 +152,28 @@ DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 5)
 USD_PER_MTOK_IN = _env_float("USD_PER_MTOK_IN", 0.0)
 USD_PER_MTOK_OUT = _env_float("USD_PER_MTOK_OUT", 0.0)
 
+# --- Langfuse (agent tracing) ---
+# The full picture of a turn — every node, model call and tool call — grouped by
+# conversation. Unlike the LANGSMITH_ variables, which LangSmith reads itself,
+# these are read by us (see core/tracing.py): the key pair is the switch, and a
+# half-configured pair leaves tracing off rather than half on.
+LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
+# Two names each, because the SDK reads these itself as well, and its own
+# order puts LANGFUSE_BASE_URL ahead of the host passed to the constructor.
+# Reading what it reads means the value doctor reports is the value that gets
+# used — a US-region key pair under a default EU host is otherwise silent.
+LANGFUSE_HOST = _env_any(
+    ("LANGFUSE_BASE_URL", "LANGFUSE_HOST"), "https://cloud.langfuse.com"
+)
+# Separates the deployed box from a laptop pointed at the same project. Empty
+# leaves the SDK's own default, which is "default".
+LANGFUSE_ENVIRONMENT = _env_any(("LANGFUSE_ENVIRONMENT", "LANGFUSE_TRACING_ENVIRONMENT"), "")
+# Traces carry prompts and completions, the resume profile in the system prompt
+# included. Set this to keep the call tree, latencies and token counts while
+# leaving the content on the box.
+LANGFUSE_HIDE_CONTENT = _env_bool("LANGFUSE_HIDE_CONTENT", False)
+
 # --- Logging ---
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = _env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
@@ -140,26 +189,36 @@ TOOL_REQUEST_TIMEOUT_SECONDS = _env_int("TOOL_REQUEST_TIMEOUT_SECONDS", 30)  # j
 GEO_REQUEST_TIMEOUT_SECONDS = _env_int("GEO_REQUEST_TIMEOUT_SECONDS", 10)    # ip-api
 
 
+#: What each entry point cannot start without. ``scout doctor`` reports the same
+#: lists, so a check and a start-up failure can never disagree about what is
+#: required — see ``missing_for`` and ``scout/checks.py``.
+BOT_REQUIRES = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
+DIGEST_REQUIRES = ("SLACK_BOT_TOKEN", "DIGEST_SLACK_USER")
+
+
+def missing_for(required: Sequence[str]) -> list[str]:
+    """Which of ``required`` are unset or empty, in the order given.
+
+    Looked up by name in this module, so callers name a setting the way the
+    operator does and read whatever the process actually has. An unknown name
+    raises rather than reporting itself missing, which would be a typo quietly
+    turning into a start-up failure.
+    """
+    configured = globals()
+    return [name for name in required if not configured[name]]
+
+
 def require_slack_credentials() -> None:
     """Fail readably when the tokens needed to connect are missing.
 
     Called from the entry point, not at import, so tests and tooling can import
     the package without a configured ``.env``.
     """
-    missing = [
-        name
-        for name, value in (
-            ("SLACK_BOT_TOKEN", SLACK_BOT_TOKEN),
-            ("SLACK_APP_TOKEN", SLACK_APP_TOKEN),
-        )
-        if not value
-    ]
-    if missing:
-        raise SystemExit(
-            f"Missing required setting(s): {', '.join(missing)}.\n"
-            "Copy .env.example to .env and fill in your Slack tokens "
-            "(see docs/getting-started.md), then run `scout doctor`."
-        )
+    _require(
+        BOT_REQUIRES,
+        "Copy .env.example to .env and fill in your Slack tokens "
+        "(see docs/getting-started.md), then run `scout doctor`.",
+    )
 
 
 def require_digest_config() -> None:
@@ -169,17 +228,15 @@ def require_digest_config() -> None:
     different things: the digest posts over the Web API and never opens a socket,
     so it wants ``SLACK_BOT_TOKEN`` but not ``SLACK_APP_TOKEN``.
     """
-    missing = [
-        name
-        for name, value in (
-            ("SLACK_BOT_TOKEN", SLACK_BOT_TOKEN),
-            ("DIGEST_SLACK_USER", DIGEST_SLACK_USER),
-        )
-        if not value
-    ]
+    _require(
+        DIGEST_REQUIRES,
+        "The digest needs a bot token and the Slack user id to DM; see "
+        "the 'Daily digest' section of docs/operations.md.",
+    )
+
+
+def _require(required: Sequence[str], remedy: str) -> None:
+    """Exit with the missing names and what to do about them, or return."""
+    missing = missing_for(required)
     if missing:
-        raise SystemExit(
-            f"Missing required setting(s): {', '.join(missing)}.\n"
-            "The digest needs a bot token and the Slack user id to DM; see "
-            "the 'Daily digest' section of docs/operations.md."
-        )
+        raise SystemExit(f"Missing required setting(s): {', '.join(missing)}.\n{remedy}")

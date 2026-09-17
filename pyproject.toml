@@ -46,6 +46,12 @@ dependencies = [
     # Tracing. Pulled in by langchain-core anyway; named here because the
     # deployment turns it on with LANGSMITH_TRACING.
     "langsmith>=0.12.0",
+    # Agent observability: the per-turn call tree, wired up in core/tracing.py.
+    # `langchain` is not imported anywhere in this package — langfuse's LangChain
+    # integration imports it to tell v0 from v1, and refuses to load without
+    # it — so it is a dependency of the handler, not of Scout.
+    "langfuse>=4.0.0",
+    "langchain>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -83,17 +89,18 @@ pythonpath = ["."]
 addopts = "-q --strict-markers --strict-config"
 
 [tool.coverage.run]
+# The package only: ``run.py`` is a three-line shim, and naming a file here
+# rather than a package makes coverage warn. ``tests/test_cli.py`` still pins
+# that it calls the same entry point.
 source = ["scout"]
 branch = true
-# Nothing to cover but the import and the SystemExit around it.
-omit = ["scout/__main__.py"]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-# Sits at 96%; the floor is low enough not to fail on a refactor and high
-# enough that dropping a layer of tests shows up in CI.
-fail_under = 92
+# The suite covers every line and every branch, so the floor is the ceiling:
+# anything less means a path shipped without a test that reads it.
+fail_under = 100
 exclude_also = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",

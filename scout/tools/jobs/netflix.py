@@ -8,24 +8,23 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
+from . import fetch
+from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
-    is_ai_ml_role,
-    json_rows,
+    merge_queries,
     render_postings,
-    search_queries,
     take_newest,
 )
+from .relevance import is_ai_ml_role, search_queries
 
 SEARCH_URL = "https://explore.jobs.netflix.net/api/apply/v2/jobs"
 JOB_BASE_URL = "https://explore.jobs.netflix.net/careers/job/"
+ORGANIZATION = "Netflix"
 
 API_PAGE_SIZE = 50  # rows per query, before filtering
 
@@ -45,10 +44,11 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return ("No relevant Netflix roles found right now. "
+            return (f"No relevant {ORGANIZATION} roles found right now. "
                     "Try again later or widen your keywords.")
         return render_postings(
-            "*Latest Netflix AI/ML roles (most recent first) — {count} found:*", postings
+            f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
+            postings,
         )
 
 
@@ -59,32 +59,26 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+    found = merge_queries(search_queries(keywords), _postings_for)
+    return None if found is None else take_newest(found, limit)
 
-    found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
-    reached = False
-    for query in search_queries(keywords):
-        positions = _fetch_positions(query)
-        if positions is None:
-            continue
-        reached = True
-        for position in positions:
-            job_id = str(position.get("id") or "")
-            title = (position.get("name") or "").strip()
-            if not job_id or job_id in found or not is_ai_ml_role(title):
-                continue
-            found[job_id] = _to_posting(position, job_id, title)
 
-    # Every query failing means the API is down, which a caller may need to
-    # report differently from "Netflix has nothing".
-    if not reached:
+def _postings_for(query: str) -> QueryResults:
+    """One keyword search, as (job id, posting) pairs, or None if unreachable."""
+    rows = fetch.get_rows(SEARCH_URL, "positions", _params(query))
+    if rows is None:
         return None
-    return take_newest(list(found.values()), limit)
+    found = []
+    for position in rows:
+        job_id = str(position.get("id") or "")
+        title = (position.get("name") or "").strip()
+        if job_id and is_ai_ml_role(title):
+            found.append((job_id, _to_posting(position, job_id, title)))
+    return found
 
 
-def _fetch_positions(query: str) -> list[dict] | None:
-    """Run one keyword search. Returns None if Netflix is unreachable, so the
-    remaining profile queries can still produce an answer."""
-    params: dict[str, str | int] = {
+def _params(query: str) -> dict[str, str | int]:
+    return {
         "domain": "netflix.com",
         "query": query,
         "location": "United States",
@@ -92,24 +86,13 @@ def _fetch_positions(query: str) -> list[dict] | None:
         "num": API_PAGE_SIZE,
         "start": 0,
     }
-    try:
-        resp = requests.get(
-            SEARCH_URL,
-            params=params,
-            headers={"User-Agent": settings.TOOL_USER_AGENT, "Accept": "application/json"},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return json_rows(resp.json(), "positions")
-    except Exception:
-        return None
 
 
 def _to_posting(position: dict, job_id: str, title: str) -> JobPosting:
     """Convert one API row."""
     return JobPosting(
         title=title,
-        organization="Netflix",
+        organization=ORGANIZATION,
         url=position.get("canonicalPositionUrl") or (JOB_BASE_URL + job_id),
         location=(position.get("location") or "").strip(),
         date=_parse_created(position.get("t_create")),
@@ -118,7 +101,7 @@ def _to_posting(position: dict, job_id: str, title: str) -> JobPosting:
 
 def _parse_created(timestamp: object) -> datetime | None:
     """Parse ``t_create`` (unix seconds, sometimes missing) as UTC."""
-    if not isinstance(timestamp, (int, float)):
+    if not isinstance(timestamp, int | float):
         return None
     try:
         return datetime.fromtimestamp(timestamp, tz=timezone.utc)

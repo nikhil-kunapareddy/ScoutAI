@@ -10,9 +10,9 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from scout.agents import resume_parser
 from scout.agents.resume_tailored import ResumeTailoredAgent
 from scout.core import settings
-from scout.core.agent import Agent
 from scout.core.checkpoints import build_checkpointer
 from scout.core.paths import PROJECT_ROOT, under_root
+from scout.core.runner import Agent
 
 
 @pytest.fixture

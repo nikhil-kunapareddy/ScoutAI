@@ -27,3 +27,8 @@ def test_the_default_limit_is_slacks() -> None:
     """Nothing splits until a reply passes the limit the bot actually uses."""
     assert split_message("a" * MAX_MESSAGE_CHARS) == ["a" * MAX_MESSAGE_CHARS]
     assert len(split_message("a\n" * MAX_MESSAGE_CHARS)) > 1
+
+
+def test_a_reply_of_only_blank_lines_sends_nothing() -> None:
+    """Nothing to say is better sent as no message than as an empty one."""
+    assert split_message("\n" * (MAX_MESSAGE_CHARS + 1)) == []

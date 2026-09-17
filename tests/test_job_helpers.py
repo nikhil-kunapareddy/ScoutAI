@@ -6,15 +6,17 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from scout.tools.jobs import (
-    PROFILE_QUERIES,
+from scout.tools.jobs.posting import (
     JobPosting,
     clamp_int,
+    render_postings,
+    take_newest,
+)
+from scout.tools.jobs.relevance import (
+    PROFILE_QUERIES,
     is_ai_ml_role,
     matches_keywords,
-    render_postings,
     search_queries,
-    take_newest,
 )
 
 

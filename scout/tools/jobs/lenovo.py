@@ -15,25 +15,23 @@ merges them the way Amazon and Netflix do.
 
 from __future__ import annotations
 
-import html
 import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
+from . import feeds, fetch
+from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
-    is_ai_ml_role,
+    merge_queries,
     render_postings,
-    search_queries,
     take_newest,
 )
+from .relevance import is_ai_ml_role, search_queries
 
 FEED_URL = "https://jobs.lenovo.com/en_US/careers/SearchJobs/feed/"
 ORGANIZATION = "Lenovo"
@@ -47,7 +45,6 @@ US_FACET = {"13036": "[12016802]", "13036_format": "6621"}
 #: queries already overlap.
 API_PAGE_SIZE = 20
 
-_ITEM_RE = re.compile(r"<item>(.*?)</item>", re.S)
 #: .../JobDetail/{slug}/{id} — the id, for de-duping across queries.
 _JOB_ID_RE = re.compile(r"/JobDetail/[^/]+/(\d+)")
 
@@ -68,7 +65,7 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return ("No relevant Lenovo roles found right now. "
+            return (f"No relevant {ORGANIZATION} roles found right now. "
                     "Try again later or widen your keywords.")
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
@@ -83,46 +80,29 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
+    found = merge_queries(search_queries(keywords), _postings_for)
+    return None if found is None else take_newest(found, limit)
 
-    found: dict[str, JobPosting] = {}  # by job id, de-duped across queries
-    reached = False
-    for query in search_queries(keywords):
-        feed = _fetch_feed(query)
-        if feed is None:
-            continue
-        reached = True
-        for item in _ITEM_RE.findall(feed):
-            posting = _to_posting(item)
-            if posting is not None:
-                found.setdefault(_job_id(posting.url), posting)
 
-    # Every query failing means the portal is down, which a caller may need to
-    # report differently from "Lenovo has nothing".
-    if not reached:
+def _postings_for(query: str) -> QueryResults:
+    """One keyword search, as (job id, posting) pairs, or None if unreachable."""
+    feed = fetch.get_text(FEED_URL, _params(query))
+    if feed is None:
         return None
-    return take_newest(list(found.values()), limit)
+    return [
+        (_job_id(posting.url), posting)
+        for item in feeds.items(feed)
+        if (posting := _to_posting(item)) is not None
+    ]
 
 
-def _fetch_feed(query: str) -> str | None:
-    """Run one keyword search. Returns None if Lenovo is unreachable, so the
-    remaining profile queries can still produce an answer."""
-    params: dict[str, str | int] = {
+def _params(query: str) -> dict[str, str | int]:
+    return {
         **US_FACET,
         "listFilterMode": 1,
         "jobRecordsPerPage": API_PAGE_SIZE,
         "search": query,
     }
-    try:
-        resp = requests.get(
-            FEED_URL,
-            params=params,
-            headers={"User-Agent": settings.TOOL_USER_AGENT},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return resp.text
-    except Exception:
-        return None
 
 
 def _to_posting(item: str) -> JobPosting | None:
@@ -132,14 +112,14 @@ def _to_posting(item: str) -> JobPosting | None:
     support roles that merely mention AI; the shared title filter is what keeps
     the list to the user's field.
     """
-    title = _tag_text(item, "title")
+    title = feeds.tag_text(item, "title")
     if not is_ai_ml_role(title):
         return None
-    raw_date = _tag_text(item, "pubDate")
+    raw_date = feeds.tag_text(item, "pubDate")
     return JobPosting(
         title=title,
         organization=ORGANIZATION,
-        url=_tag_text(item, "link"),
+        url=feeds.tag_text(item, "link"),
         date=_parse_pub_date(raw_date),
         posted_label=raw_date,  # shown verbatim when the date won't parse
     )
@@ -149,12 +129,6 @@ def _job_id(url: str) -> str:
     """The numeric id in a job URL, falling back to the URL itself."""
     match = _JOB_ID_RE.search(url)
     return match.group(1) if match else url
-
-
-def _tag_text(item: str, tag: str) -> str:
-    """Extract one RSS tag's text, unwrapping CDATA and decoding entities."""
-    match = re.search(rf"<{tag}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{tag}>", item, re.S)
-    return html.unescape(match.group(1).strip()) if match else ""
 
 
 def _parse_pub_date(raw: str) -> datetime | None:

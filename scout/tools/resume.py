@@ -52,7 +52,7 @@ def register(reg: ToolRegistry) -> None:
             return (f"No resume found in {directory.name}/. Add a resume file "
                     "(PDF, DOCX, TXT, or MD) to that folder.")
 
-        newest = max(resumes, key=lambda p: p.stat().st_mtime)
+        newest = max(resumes, key=lambda path: path.stat().st_mtime)
         try:
             text = _extract_text(newest).strip()
         except Exception as e:

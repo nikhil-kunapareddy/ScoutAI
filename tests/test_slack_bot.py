@@ -249,3 +249,100 @@ def test_sigterm_triggers_the_normal_shutdown_path() -> None:
             os.kill(os.getpid(), signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def test_an_unknown_backend_is_reported_not_silently_ignored(bot, monkeypatch) -> None:
+    """``set_backend`` returning False means the model name is gone or misspelt;
+    the user has to be told, or they keep talking to the old one."""
+    monkeypatch.setattr(slack_bot, "App", FakeApp)
+
+    class Refusing(FakeAgent):
+        def set_backend(self, user_id: str, name: str) -> bool:
+            return False
+
+    sent: list[str] = []
+    SlackBot(Refusing())._app.handler(
+        {"channel_type": "im", "user": "U1", "text": "--ollama"}, sent.append
+    )
+
+    assert sent == [":warning: Unknown backend `ollama`."]
+
+
+# --- Running --------------------------------------------------------------
+
+
+class FakeHandler:
+    """Stands in for ``SocketModeHandler``, which would open a websocket."""
+
+    def __init__(self, app, token: str, fail: Exception | None = None) -> None:
+        self.app = app
+        self.token = token
+        self.fail = fail
+        self.started = False
+        self.closed = False
+
+    def start(self) -> None:
+        self.started = True
+        if self.fail:
+            raise self.fail
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def handlers(monkeypatch):
+    """Capture the socket-mode handler the bot builds, and restore SIGTERM."""
+    monkeypatch.setattr(slack_bot, "App", FakeApp)
+    built: list[FakeHandler] = []
+
+    def build(app, token: str) -> FakeHandler:
+        built.append(FakeHandler(app, token, fail=KeyboardInterrupt()))
+        return built[-1]
+
+    monkeypatch.setattr(slack_bot, "SocketModeHandler", build)
+    previous = signal.getsignal(signal.SIGTERM)
+    yield built
+    signal.signal(signal.SIGTERM, previous)
+
+
+def test_start_connects_with_the_app_token_and_serves(handlers, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-test")
+
+    SlackBot(FakeAgent()).start()
+
+    (handler,) = handlers
+    assert handler.token == "xapp-test"
+    assert handler.started
+
+
+def test_ctrl_c_closes_the_connection(handlers) -> None:
+    """Ctrl-C is the ordinary way to stop it, and must not leak the websocket."""
+    SlackBot(FakeAgent()).start()
+
+    assert handlers[0].closed
+
+
+def test_a_crash_still_closes_the_connection(handlers, monkeypatch) -> None:
+    monkeypatch.setattr(
+        slack_bot,
+        "SocketModeHandler",
+        lambda app, token: handlers.append(FakeHandler(app, token, OSError("gone")))
+        or handlers[-1],
+    )
+
+    with pytest.raises(OSError, match="gone"):
+        SlackBot(FakeAgent()).start()
+
+    assert handlers[-1].closed
+
+
+def test_startup_logs_name_the_agent_and_its_tools(handlers, caplog) -> None:
+    """The first thing read when a deployed bot misbehaves."""
+    with caplog.at_level("INFO", logger="scout"):
+        SlackBot(FakeAgent()).start()
+
+    logged = "\n".join(caplog.messages)
+    assert "Fake Agent" in logged
+    assert "echo" in logged
+    assert "Default backend" in logged

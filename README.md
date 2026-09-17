@@ -88,12 +88,12 @@ never touches the graph.
 | [Architecture](docs/architecture.md) | The graphs, the seams, and the invariants behind them |
 | [Extending](docs/extending.md) | Add an agent, a tool, a job source, or a model provider |
 | [Deployment](docs/deployment.md) | Docker, AWS, GCP, and what it costs to run |
-| [Operations](docs/operations.md) | The digest, turn metrics, tracing, and alerts |
+| [Operations](docs/operations.md) | The digest, turn metrics, Langfuse tracing, and alerts |
 
 ## Contributing
 
 Issues and pull requests are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md). `make check` runs everything CI runs: ruff,
+[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). `make check` runs everything CI runs: ruff,
 mypy, and the full suite, which needs no network and no credentials.
 
 <div align="center">

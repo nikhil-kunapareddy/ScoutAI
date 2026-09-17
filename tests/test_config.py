@@ -12,9 +12,10 @@ import pytest
 from scout.agents import AGENTS, build_agent, get_spec
 from scout.agents.resume_tailored import ResumeTailoredAgent
 from scout.core import logging_config, paths, settings
-from scout.core.agent import Agent, AgentSpec
+from scout.core.agent import AgentSpec
 from scout.core.logging_config import configure_logging
-from scout.core.settings import _env_int
+from scout.core.runner import Agent
+from scout.core.settings import _env_any, _env_bool, _env_int
 
 # --- Settings -------------------------------------------------------------
 
@@ -31,6 +32,51 @@ def test_env_int(monkeypatch, raw: str | None, expected: int) -> None:
     if raw is not None:
         monkeypatch.setitem(os.environ, "SCOUT_TEST_INT", raw)
     assert _env_int("SCOUT_TEST_INT", 7) == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("true", True),
+    ("TRUE", True),
+    ("1", True),
+    ("yes", True),
+    (" on ", True),
+    ("false", False),
+    ("", False),
+    ("ture", False),   # a typo in a switch must not read as "on"
+    (None, False),     # unset falls back to the default
+])
+def test_env_bool(monkeypatch, raw: str | None, expected: bool) -> None:
+    monkeypatch.delitem(os.environ, "SCOUT_TEST_BOOL", raising=False)
+    if raw is not None:
+        monkeypatch.setitem(os.environ, "SCOUT_TEST_BOOL", raw)
+    assert _env_bool("SCOUT_TEST_BOOL", False) is expected
+
+
+@pytest.mark.parametrize(("environ", "expected"), [
+    ({"LANGFUSE_BASE_URL": "https://us.example"}, "https://us.example"),
+    ({"LANGFUSE_HOST": "https://eu.example"}, "https://eu.example"),
+    # Both set: the first name wins, which is the order the SDK itself uses.
+    ({"LANGFUSE_BASE_URL": "https://us.example", "LANGFUSE_HOST": "https://eu.example"},
+     "https://us.example"),
+    # Set but empty is not a value — it would otherwise mask the second name.
+    ({"LANGFUSE_BASE_URL": "", "LANGFUSE_HOST": "https://eu.example"},
+     "https://eu.example"),
+    ({}, "https://fallback.example"),
+])
+def test_env_any_reads_the_names_in_order(monkeypatch, environ: dict, expected: str) -> None:
+    """Regression guard: the SDK puts LANGFUSE_BASE_URL ahead of the host it is
+    handed, so a setting read under only one name reports what is not used."""
+    for name in ("LANGFUSE_BASE_URL", "LANGFUSE_HOST"):
+        monkeypatch.delitem(os.environ, name, raising=False)
+    for name, value in environ.items():
+        monkeypatch.setitem(os.environ, name, value)
+
+    assert _env_any(("LANGFUSE_BASE_URL", "LANGFUSE_HOST"), "https://fallback.example") == expected
+
+
+def test_env_bool_keeps_a_true_default_when_unset(monkeypatch) -> None:
+    monkeypatch.delitem(os.environ, "SCOUT_TEST_BOOL", raising=False)
+    assert _env_bool("SCOUT_TEST_BOOL", True) is True
 
 
 def test_missing_slack_tokens_exit_with_instructions(monkeypatch) -> None:
@@ -231,3 +277,42 @@ def test_logging_rotates_and_creates_its_directory(monkeypatch, tmp_path) -> Non
         for handler in list(root.handlers):
             handler.close()
         root.handlers = previous
+
+
+def test_debug_logging_leaves_the_third_party_loggers_alone(monkeypatch) -> None:
+    """``LOG_LEVEL=DEBUG`` is someone asking for everything, Slack's chatter
+    included — clamping it then would hide what they turned it on for."""
+    slack = logging.getLogger("slack_sdk.test_child")
+    previous = slack.level
+    try:
+        slack.setLevel(logging.DEBUG)
+        monkeypatch.setattr(settings, "LOG_LEVEL", "DEBUG")
+
+        logging_config.quiet_third_party_loggers()
+
+        assert slack.level == logging.DEBUG
+    finally:
+        slack.setLevel(previous)
+
+
+def test_the_package_logger_is_the_one_configure_logging_returns() -> None:
+    assert logging_config.logger().name == logging_config.LOGGER_NAME
+
+
+# --- Required settings ------------------------------------------------------
+
+
+def test_what_each_entry_point_requires_is_declared_once(monkeypatch) -> None:
+    """``scout doctor`` and the start-up failure read the same list, so they
+    cannot disagree about what is required."""
+    monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "")
+    monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
+
+    assert settings.missing_for(settings.BOT_REQUIRES) == ["SLACK_BOT_TOKEN"]
+
+
+def test_a_misspelt_setting_name_raises_rather_than_reading_as_missing() -> None:
+    """Otherwise a typo in a required list turns into a start-up failure nobody
+    can explain."""
+    with pytest.raises(KeyError):
+        settings.missing_for(("SLACK_BOT_TOKn",))

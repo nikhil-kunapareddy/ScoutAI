@@ -1,0 +1,103 @@
+# Changelog
+
+Notable changes to Scout. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims
+to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from its
+first release.
+
+## [Unreleased]
+
+### Added
+
+- Langfuse tracing, for the inside of a turn: every graph node, model call and
+  tool call, with prompts, tool output, token counts and latencies, grouped by
+  conversation — the checkpointer thread becomes the Langfuse session, the agent
+  becomes a tag, and `scout.__version__` becomes the release. It lives in
+  `scout/core/tracing.py`, the only module that knows Langfuse exists, and is
+  attached per turn in `GraphRunner.respond` rather than being a second code
+  path. Both keys together are the switch; `LANGFUSE_HIDE_CONTENT` masks the
+  prompts, `scout doctor` reports which state it is in, and a handler that
+  cannot be built leaves turns untraced rather than failing them. The host and
+  the environment are read under both their names (`LANGFUSE_BASE_URL` as well
+  as `LANGFUSE_HOST`), in the order the SDK itself reads them, so the reported
+  value is the one used.
+
+  Shaped to Langfuse's own tracing guidance, and checked against a real trace:
+  one trace per turn, named `answer-slack-dm` or `run-job-digest`; a root span
+  Scout owns, so the trace's input and output are the question and the reply
+  rather than a graph state dump; a `generation` per model call interleaved with
+  its `tool` calls; `slack`/`digest` tags and a `scout_backend` metadata field;
+  the routing edges dropped on export; and `shutdown()` — not `flush()` — when a
+  short-lived command exits.
+- `scout` command line with one entry point per job: `scout run`, `scout
+  digest`, `scout stats`, `scout agents`, and `scout doctor`. `python run.py`
+  and `python -m scout.digest` keep working.
+- `scout doctor` — reports what is configured in a checkout and what is
+  missing, reading only local files, so it is safe to run on a broken box.
+- Continuous integration: ruff, mypy, the test suite on Python 3.10–3.13, and a
+  job that installs the built wheel and runs the console script.
+- Type-checking with `mypy` under `disallow_untyped_defs`, and a `py.typed`
+  marker so the package's types are visible to anything that imports it.
+- MIT licence, contributing guide, security policy, code of conduct, issue and
+  pull-request templates, Dependabot, `Makefile`, and `.editorconfig`.
+- Documentation split into task-shaped pages under `docs/`, starting with a
+  getting-started walkthrough.
+- Tests for the clock, location, and résumé tools, and for the new command line
+  and configuration report.
+- Full coverage: every statement and every branch in `scout/` is exercised, and
+  `fail_under = 100` keeps it that way.
+
+### Changed
+
+- `scout doctor`'s `tracing` line is now two, `langfuse` and `langsmith`: with
+  two backends configurable, one line called "tracing" could not say which was.
+- `pyproject.toml` is the single source of truth for dependencies;
+  `requirements.txt` and `requirements-dev.txt` are generated from it by
+  `scripts/sync_requirements.py`, and a test fails if they drift.
+- Message splitting moved from `scout/slack/bot.py` to
+  `scout/slack/formatting.py`, so the digest no longer imports a private
+  helper from the bot.
+- Job sources read their JSON rows through one shared `json_rows` helper, which
+  checks the shape a board actually returned.
+- The job package's shared parts are split by the job they do —
+  `fetch` (HTTP, and what "unreachable" means), `feeds` (RSS), `posting` (the
+  record, merging queries, rendering) and `relevance` (which titles count). Each
+  source imports from the module that owns the name instead of one grab-bag
+  `__init__`, and every request now goes through `fetch`, which is also the one
+  seam the suite stubs.
+- Greenhouse and Ashby share `HostedBoard` rather than two copies of the same
+  code. A board platform now declares its URL, its rows key, its companies and
+  how to read one row; the slug lookup, the fetch and the three replies a board
+  tool owes are written once.
+- `scout/core/agent.py` split along the seam it already had: declaring an agent
+  and building its graph stay there, driving a compiled graph moved to
+  `scout/core/runner.py` (`GraphRunner`, `Agent`).
+- The package logger is `logging_config.logger()` rather than
+  `logging.getLogger("scout")` repeated in nine modules, and the required-setting
+  lists behind `scout doctor` and the start-up failure are declared once, in
+  `settings.BOT_REQUIRES` / `DIGEST_REQUIRES`.
+
+### Removed
+
+- Dead code: the unused loggers in `scout/alert.py` and `scout/core/referrals.py`,
+  `ToolRegistry.names()` and three re-exports in `scout/slack/__init__.py` that
+  nothing imported, an unreachable branch in `stats.parse`, and `stats.main()` —
+  a second copy of the argument parsing that `scout stats` already does.
+
+### Fixed
+
+- The `scout` console script pointed at `run:main`, a module that is not part
+  of the package: installing the wheel produced a command that could not start.
+- `langgraph-checkpoint-sqlite` and `langsmith` were listed in
+  `requirements.txt` but not in `pyproject.toml`, so `pip install .` produced
+  an install that could not even import `scout.core.checkpoints`.
+- The test suite sent LangSmith traces from every scripted turn when the
+  developer's `.env` had tracing on. It now pins `LANGSMITH_TRACING=false`, so a
+  run touches no network whether or not a `.env` is present.
+
+## Before this changelog
+
+The platform — the LangGraph agent runtime, the Slack adapter, the two
+job-search agents, the résumé hand-off, the Referral Window, the daily digest,
+turn metrics, and the EC2 deployment — was built before this file existed. See
+the commit history for that.

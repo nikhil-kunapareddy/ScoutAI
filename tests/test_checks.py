@@ -33,6 +33,11 @@ def configured(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
+    # Pinned empty rather than inherited: a developer with a key in .env would
+    # otherwise exercise a different branch here than CI does.
+    monkeypatch.setattr(settings, "LLAMA_API_KEY", "")
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "")
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "")
     monkeypatch.setattr(settings, "FALLBACK_BACKEND", "ollama")
     monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "U1")
     monkeypatch.setattr(settings, "CHECKPOINT_DB", "")
@@ -171,3 +176,85 @@ def test_the_report_asks_nothing_of_the_network(configured, monkeypatch) -> None
     monkeypatch.setattr(requests, "post", explode)
 
     assert checks.run().ok
+
+
+def test_a_configured_llama_key_is_listed_as_available(configured, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LLAMA_API_KEY", "llx-x")
+
+    detail = {c.label: c.detail for c in checks.run().checks}["models"]
+
+    assert "llama (" in detail
+    assert "anthropic (" in detail
+    assert "ollama (" in detail
+
+
+def test_langsmith_names_the_project_when_it_is_on(configured, monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "scout-test")
+
+    report = checks.run()
+
+    assert "on, project 'scout-test'" in report.render()
+    assert levels(report)["langsmith"] == checks.OK
+
+
+def test_langsmith_falls_back_to_the_default_project(configured, monkeypatch) -> None:
+    monkeypatch.setenv("LANGSMITH_TRACING", "1")
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+
+    assert "project 'default'" in checks.run().render()
+
+
+# --- Langfuse -------------------------------------------------------------
+#
+# Unlike LangSmith, this one is Scout's own (see scout/core/tracing.py), so the
+# report reads the settings the runtime reads and the two cannot disagree.
+
+
+def test_langfuse_off_says_what_would_turn_it_on(configured) -> None:
+    report = checks.run()
+
+    detail = {check.label: check.detail for check in report.checks}["langfuse"]
+    assert "LANGFUSE_PUBLIC_KEY" in detail
+    assert "LANGFUSE_SECRET_KEY" in detail
+    # Off is a choice, not a fault.
+    assert levels(report)["langfuse"] == checks.OK
+
+
+@pytest.mark.parametrize("configured_key", ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"])
+def test_half_a_key_pair_is_a_warning(configured, monkeypatch, configured_key: str) -> None:
+    """The one state that reads as "on" in the .env while tracing nothing."""
+    monkeypatch.setattr(settings, configured_key, "lf-x")
+    missing = {"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"} - {configured_key}
+
+    report = checks.run()
+
+    assert levels(report)["langfuse"] == checks.WARN
+    assert f"{missing.pop()} is missing" in report.render()
+
+
+def test_langfuse_on_names_the_host_and_warns_about_the_prompts(
+    configured, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "pk-lf-x")
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "sk-lf-x")
+    monkeypatch.setattr(settings, "LANGFUSE_HOST", "https://langfuse.test")
+    monkeypatch.setattr(settings, "LANGFUSE_ENVIRONMENT", "")
+    monkeypatch.setattr(settings, "LANGFUSE_HIDE_CONTENT", False)
+
+    report = checks.run()
+
+    assert levels(report)["langfuse"] == checks.OK
+    assert "tracing to https://langfuse.test (prompts included)" in report.render()
+
+
+def test_langfuse_names_its_environment_and_its_mask(configured, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "pk-lf-x")
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "sk-lf-x")
+    monkeypatch.setattr(settings, "LANGFUSE_ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "LANGFUSE_HIDE_CONTENT", True)
+
+    rendered = checks.run().render()
+
+    assert "environment 'production'" in rendered
+    assert "(content masked)" in rendered

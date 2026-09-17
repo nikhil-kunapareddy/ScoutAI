@@ -6,7 +6,7 @@ import pytest
 
 from scout import digest
 from scout.agents import AGENTS
-from scout.core import settings
+from scout.core import settings, tracing
 from scout.core.agent import AgentSpec, ConversationalAgent
 from scout.slack import notify
 
@@ -151,3 +151,38 @@ def test_long_digest_is_split_across_messages(monkeypatch) -> None:
 
     assert len(sent) > 1
     assert all(channel == "U1" for channel, _ in sent)
+
+
+def test_main_checks_the_config_then_dms_the_report(two_agents, monkeypatch) -> None:
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
+    monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "U1")
+    monkeypatch.setattr(digest, "post_dm", lambda user, text: sent.append((user, text)))
+
+    digest.main()
+
+    (user, report) = sent[0]
+    assert user == "U1"
+    assert "roles from alpha" in report
+
+
+def test_main_shuts_tracing_down_before_exiting(two_agents, monkeypatch) -> None:
+    """Export is batched on a background thread, and this process is about to
+    exit — a digest that does not drain it is one nobody can look at after."""
+    flushed = []
+    monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
+    monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "U1")
+    monkeypatch.setattr(digest, "post_dm", lambda user, text: None)
+    monkeypatch.setattr(tracing, "shutdown", lambda: flushed.append(1))
+
+    digest.main()
+
+    assert flushed == [1]
+
+
+def test_main_refuses_without_somewhere_to_send(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
+    monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "")
+
+    with pytest.raises(SystemExit, match="DIGEST_SLACK_USER"):
+        digest.main()

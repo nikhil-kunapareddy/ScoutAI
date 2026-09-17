@@ -6,29 +6,22 @@ fetch the feed and filter here. Each item carries a real ``postingDate``.
 
 from __future__ import annotations
 
-import html
-import re
 from datetime import datetime
 
-import requests
-
-from ...core import settings
 from ..registry import ToolRegistry
-from . import (
+from . import feeds, fetch
+from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    is_ai_ml_role,
-    matches_keywords,
     render_postings,
     take_newest,
 )
+from .relevance import is_ai_ml_role, matches_keywords
 
 FEED_URL = "https://jobs.silkroad.com/BU/External/rss"
 ORGANIZATION = "Boston University"
-
-_ITEM_RE = re.compile(r"<item>(.*?)</item>", re.S)
 
 
 def register(reg: ToolRegistry) -> None:
@@ -65,59 +58,43 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
 
-    feed = _fetch_feed()
+    feed = fetch.get_text(FEED_URL)
     if feed is None:
         return None
 
     terms = keywords.lower().split()
     postings = [
         posting
-        for item in _ITEM_RE.findall(feed)
+        for item in feeds.items(feed)
         if (posting := _to_posting(item, terms)) is not None
     ]
     return take_newest(postings, limit)
 
 
-def _fetch_feed() -> str | None:
-    """Fetch the RSS feed, or None if BU can't be reached."""
-    try:
-        resp = requests.get(
-            FEED_URL,
-            headers={"User-Agent": settings.TOOL_USER_AGENT},
-            timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
-        )
-        resp.raise_for_status()
-        return resp.text
-    except Exception:
-        return None
-
-
 def _to_posting(item: str, terms: list[str]) -> JobPosting | None:
     """Convert one RSS ``<item>``, or None if it should be skipped."""
-    title = _tag_text(item, "title")
-    # Explicit keywords win; otherwise fall back to the AI/ML filter, since the
-    # feed has no server-side search.
-    if terms:
-        if not matches_keywords(title, terms):
-            return None
-    elif not is_ai_ml_role(title):
+    title = feeds.tag_text(item, "title")
+    if not _is_wanted(title, terms):
         return None
 
-    raw_date = _tag_text(item, "postingDate")
+    raw_date = feeds.tag_text(item, "postingDate")
     return JobPosting(
         title=title,
         organization=ORGANIZATION,
-        url=_tag_text(item, "link"),
-        location=_tag_text(item, "location"),
+        url=feeds.tag_text(item, "link"),
+        location=feeds.tag_text(item, "location"),
         date=_parse_posted_date(raw_date),
         posted_label=raw_date,  # shown verbatim when the date won't parse
     )
 
 
-def _tag_text(item: str, tag: str) -> str:
-    """Extract one RSS tag's text, unwrapping CDATA and decoding entities."""
-    match = re.search(rf"<{tag}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{tag}>", item, re.S)
-    return html.unescape(match.group(1).strip()) if match else ""
+def _is_wanted(title: str, terms: list[str]) -> bool:
+    """Explicit keywords win; otherwise fall back to the AI/ML filter.
+
+    The feed has no server-side search, so one of the two always applies — asking
+    BU for "custodian" should find one, without the AI/ML filter dropping it.
+    """
+    return matches_keywords(title, terms) if terms else is_ai_ml_role(title)
 
 
 def _parse_posted_date(raw: str) -> datetime | None:

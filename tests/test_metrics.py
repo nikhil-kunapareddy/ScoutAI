@@ -7,7 +7,7 @@ import logging
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from scout.core import metrics, settings
-from scout.core.agent import Agent
+from scout.core.runner import Agent
 
 from .conftest import calls_tool
 
@@ -121,3 +121,19 @@ def test_measuring_never_breaks_a_reply(spec, chat_models, monkeypatch) -> None:
     )
     chat_models["primary"].replies = [AIMessage("still answered")]
     assert Agent(spec).respond("U1", "hi") == "still answered"
+
+
+def test_a_thread_with_no_user_message_is_measured_whole() -> None:
+    """Defensive: every turn starts with a human message, but a thread repaired
+    by hand (or a future caller) must still produce a line rather than raise."""
+    measured = metrics.measure(
+        agent="Test Agent",
+        thread="U1",
+        backend="primary",
+        answered_by="primary",
+        outcome=metrics.OK,
+        seconds=0.5,
+        messages=[AIMessage("orphaned")],
+    )
+
+    assert measured.model_calls == 1
