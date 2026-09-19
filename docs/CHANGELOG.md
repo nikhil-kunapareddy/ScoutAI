@@ -9,6 +9,38 @@ first release.
 
 ### Added
 
+- Fourteen more companies for the BigTech Agent, taking it to twenty-two: Microsoft,
+  Apple, NVIDIA, Oracle, Salesforce, Adobe, Uber, Cisco, Bloomberg, ServiceNow,
+  Anthropic, OpenAI, Snowflake and DoorDash. Every board was checked live for a
+  US filter and a posting date before it was added.
+
+  Most of them cost no new code. Anthropic and DoorDash are lines in
+  `greenhouse.BOARDS`; OpenAI and Snowflake are lines in `ashby.BOARDS`. Two new
+  shapes cover five more: `smartrecruiters.py` is a third `HostedBoard`, and
+  `workday.py` is a `WorkdayTenant` filled in for NVIDIA, Salesforce and Adobe.
+  The remaining six — Microsoft, Apple, Oracle, Uber, Cisco, Bloomberg — are one
+  module each, because their platforms share nothing.
+
+  Not every source can claim recency, and none of them pretend to. The Workday
+  sites publish only how long ago a role went up ("Posted 5 Days Ago"), which
+  goes into `posted_label` the way `northeastern.py` already does it; Bloomberg
+  publishes no date at all and says so, like `google.py`. The alternative — one
+  extra request per job to read an absolute date — was rejected as too slow for
+  what it buys, particularly since Adobe re-stamps its whole board daily and
+  would gain nothing from it.
+
+  Two companies from the same list were deliberately left out. **Palantir** would
+  need `fetch` taught to read a bare top-level JSON array — Lever's shape, which
+  currently reads as "nothing open" rather than "unreachable" — for two matching
+  US roles. **Meta** is technically reachable but its `robots.txt` prohibits
+  automated collection without written permission. Both are named as gaps by
+  `search_referral_jobs` rather than silently missing.
+
+- `fetch.get_json` and `fetch.post_json`, for sources whose rows sit below the
+  top level (Microsoft under `data`, Cisco under `refineSearch.data`, Oracle under
+  `items[0]`). They hand back the decoded body and leave the navigating — and the
+  judgement about what a missing key means — to the source.
+
 - Langfuse tracing, for the inside of a turn: every graph node, model call and
   tool call, with prompts, tool output, token counts and latencies, grouped by
   conversation — the checkpointer thread becomes the Langfuse session, the agent

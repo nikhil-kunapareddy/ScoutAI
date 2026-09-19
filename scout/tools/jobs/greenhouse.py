@@ -30,6 +30,10 @@ BOARDS = {
     "coinbase": "Coinbase",
     "dropbox": "Dropbox",
     "robinhood": "Robinhood",
+    "anthropic": "Anthropic",
+    # DoorDash's US board is "doordashusa"; the bare "doordash" slug 404s, and
+    # "doordashcanada"/"wolt" are separate boards this deliberately excludes.
+    "doordashusa": "DoorDash",
 }
 
 # Markers of a non-US role (Greenhouse locations are free text).
@@ -99,7 +103,8 @@ def register(reg: ToolRegistry) -> None:
 
         Args:
             company: Which company to search. Supported: databricks, airbnb,
-                stripe, pinterest, reddit, coinbase, dropbox, robinhood.
+                stripe, pinterest, reddit, coinbase, dropbox, robinhood,
+                anthropic, doordashusa.
             keywords: Optional phrase to narrow titles (e.g. "machine learning").
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
