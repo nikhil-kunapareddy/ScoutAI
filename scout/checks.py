@@ -14,7 +14,6 @@ a choice, not a fault.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 
 from .agents import AGENTS
@@ -87,7 +86,6 @@ def run() -> Report:
             _referrals(),
             _digest(),
             _langfuse(),
-            _langsmith(),
         ]
     )
 
@@ -207,15 +205,28 @@ def _referrals() -> Check:
 
 
 def _digest() -> Check:
+    """Whether *this* agent has a morning report, and where it would go.
+
+    Per-agent, because the digest is: one process per agent, posting with that
+    agent's own Slack token so each report lands in its own DM. Running
+    ``scout doctor`` under ``AGENT=edu`` answers for the Edu Agent's digest.
+    """
     if not settings.DIGEST_SLACK_USER:
         return Check(
             "digest",
             "DIGEST_SLACK_USER unset — `scout digest` has nobody to DM",
             WARN,
         )
+    spec = AGENTS.get(settings.ACTIVE_AGENT)
+    if spec is None or not spec.in_digest:
+        return Check(
+            "digest",
+            f"{settings.ACTIVE_AGENT} has no digest (set in_digest on its spec)",
+        )
     return Check(
         "digest",
-        f"DMs {settings.DIGEST_SLACK_USER}, {settings.DIGEST_MAX_ROLES} roles per agent",
+        f"DMs {settings.DIGEST_SLACK_USER} as {spec.name}, "
+        f"up to {settings.DIGEST_MAX_ROLES} roles",
     )
 
 
@@ -244,13 +255,3 @@ def _langfuse() -> Check:
         detail += f", environment {settings.LANGFUSE_ENVIRONMENT!r}"
     detail += " (content masked)" if settings.LANGFUSE_HIDE_CONTENT else " (prompts included)"
     return Check("langfuse", detail)
-
-
-def _langsmith() -> Check:
-    # Read from the environment, not settings: LangSmith reads these itself, so
-    # the platform never needs them and does not carry them. Langfuse is the
-    # other way round — see _langfuse — and the two can run at once.
-    if os.environ.get("LANGSMITH_TRACING", "").lower() in {"true", "1"}:
-        project = os.environ.get("LANGSMITH_PROJECT", "default")
-        return Check("langsmith", f"on, project {project!r}")
-    return Check("langsmith", "off (set LANGSMITH_TRACING=true to trace turns)")

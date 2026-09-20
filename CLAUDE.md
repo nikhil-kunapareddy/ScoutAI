@@ -4,9 +4,10 @@ Scout is a multi-agent platform for Slack DM bots, built on **LangGraph**. An
 agent = a system prompt + a set of tools, running on Claude (default), Ollama, or
 the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
 with it, both tailored to the user's resume in `data/`, plus a Referral Window
-that keeps the list of companies the user has a connection at — which the job
-agents read when they rank results, and which the Window itself searches as a
-scope, so its answer is every opening the user could ask a referral for.
+that keeps the list of companies the user has a connection at and searches it
+as a scope, so its answer is every opening the user could ask a referral for.
+The job agents do not see that list: they rank on fit and recency, and who the
+user knows somewhere is the Window's question.
 
 `README.md` is the short, outward-facing intro; `docs/` is every other document
 — the user-facing set (`getting-started`, `configuration`, `architecture`,
@@ -27,7 +28,8 @@ scout run --agent edu             # same as AGENT=edu scout run
 scout run --agent referral        # Referral Window (the referral list)
 scout run --agent resume          # Resume Parser alone, for debugging
 
-scout digest                      # run every job agent, DM one merged report
+scout digest                      # the active agent's digest, DM'd as that agent
+scout digest --agent referral     # ...each lands in its own Slack window
 scout stats --days 7              # read the turn metrics back
 scout agents                      # what is registered, and each agent's tools
 scout doctor                      # what is configured here; non-zero if it can't start
@@ -103,9 +105,17 @@ Three seams hold the layers apart — keep them intact:
 - **Adding an agent:** one file in `scout/agents/` defining `SPEC = AgentSpec(...)`,
   registered in `AGENTS` in `scout/agents/__init__.py`. Omit `default_backend` to
   inherit `settings.DEFAULT_BACKEND`. Never edit the graph to add an agent.
-- **The digest derives its agents**, it does not list them: `tailor_with_resume`
-  is the marker, so a new job agent joins the digest by existing. Don't add a
-  registry beside `AGENTS`.
+- **The digest derives its agents**, it does not list them: `in_digest` is the
+  marker, so a new job agent joins the digest by existing. Don't add a registry
+  beside `AGENTS`. It is deliberately *not* `tailor_with_resume` — that flag
+  prepends the résumé profile, this one says the agent has something to report
+  each morning, and the Referral Window is the case where they differ.
+- **One digest per agent, one DM per window.** A process holds one agent's Slack
+  token, so `scout digest` runs the *active* agent and posts as that agent.
+  Merging them in one process would post every agent's work as whichever app
+  was the default, which is what the old `scout-digest.service` did. On the box
+  that is `scout-digest@<key>` plus a `scout-digest-<key>.timer`; adding a job
+  agent means adding a timer, not editing `scout/digest.py`.
 - **Adding a tool:** a module with `register(reg: ToolRegistry)` defining `@reg.tool`
   functions, then add the module to the relevant spec's `tool_modules`. The
   signature and Google-style `Args:` block *are* the schema LangChain derives and
@@ -189,9 +199,13 @@ Three seams hold the layers apart — keep them intact:
   disposable — `--reset` drops a thread — but the list is something the user
   typed once. It is JSON in `state/`, which `deploy.sh` excludes from its rsync,
   so a redeploy can't overwrite the box's copy with a laptop's.
-- **Job agents get `referrals_read`, never `referrals`.** Only the Referral
-  Window may write. A searching agent with `add_referral` in reach eventually
+- **Job agents hold no referral tool at all.** Not `referrals`, and since
+  2026-09-19 not `referrals_read` either: they rank on fit and recency, and the
+  list is the Referral Window's scope rather than a tiebreak in someone else's
+  search. `referrals_read` stays as the read-only view to give a future agent
+  that needs one — a searching agent with `add_referral` in reach eventually
   records something mid-search that the user never asked for.
+  `test_the_job_agents_do_not_see_the_list_at_all` guards it.
 - **The Referral Window searches only within the list.** It writes the list *and*
   searches, which the rule above would otherwise forbid; what makes it safe is
   that its single search tool is `search_referral_jobs`, so there is nothing to
@@ -228,14 +242,16 @@ Three seams hold the layers apart — keep them intact:
   only `LANGFUSE_HOST` let `scout doctor` report the EU default while traces
   went to the US one. `_env_any` reads what the SDK reads, in its order.
   `test_env_any_reads_the_names_in_order` guards it.
-- **Langfuse's key pair is the switch**, unlike `LANGSMITH_TRACING`, which
-  LangSmith reads itself. `tracing.REQUIRES` is shared with `scout doctor`, so
+- **Langfuse's key pair is the switch** — there is no separate on/off flag to
+  disagree with it. `tracing.REQUIRES` is shared with `scout doctor`, so
   the report and the runtime cannot disagree; half a pair is a warning, because
   it is the one state that reads as "on" in a `.env` while tracing nothing.
-- **The suite must ship no traces.** `tests/conftest.py` pins
-  `LANGSMITH_TRACING=false`, empties the Langfuse key pair *and* the two host
-  names — the host because the SDK reads `LANGFUSE_BASE_URL` ahead of the host
-  it is handed, which had one test posting to Langfuse Cloud. In
+- **The suite must ship no traces.** `tests/conftest.py` empties the Langfuse
+  key pair *and* the two host names — the host because the SDK reads
+  `LANGFUSE_BASE_URL` ahead of the host it is handed, which had one test posting
+  to Langfuse Cloud. It also pins `LANGSMITH_TRACING=false`, which is not
+  Scout's setting at all: `langsmith` ships with `langchain-core` and reads it
+  itself, so a stale `.env` would otherwise trace from a test run. In
   `tests/test_tracing.py` the `scripted_handler` fixture pulls in `root_span`
   and `attributes` for the same reason: tracing on with a real client builds a
   real span and queues it for export.
@@ -256,9 +272,10 @@ A test must not depend on the developer's own `.env` or `data/` either: point
 fails in CI. Coverage is 100% of statements *and* branches, and `fail_under`
 holds it there; CI runs 3.10–3.13.
 
-The suite also pins `LANGSMITH_TRACING=false` (`tests/conftest.py`): importing
-`settings` loads the developer's `.env`, and a test run must not ship traces to
-a hosted service.
+The suite also pins `LANGSMITH_TRACING=false` (`tests/conftest.py`). Scout
+dropped LangSmith, but `langsmith` still arrives with `langchain-core` and reads
+that name itself, so a developer's stale `.env` must not turn a test run into a
+trace export.
 
 ## Don't commit
 

@@ -1,0 +1,24 @@
+# Referral Window job digest, every morning.
+#
+# The three digests are staggered, not simultaneous: each is its own Python
+# process on a 916 MB box with no swap, and the three bots are already resident.
+# A run takes well under a minute, so ten minutes apart is room to spare.
+[Unit]
+Description=Run the Referral Window job digest daily
+
+[Timer]
+# The template instance this starts. Named with a hyphen rather than
+# scout-digest@referral.timer so it reads as a concrete timer, not a second template.
+Unit=scout-digest@referral.service
+# The timezone is written out rather than inherited: the box happens to be set
+# to America/Los_Angeles today, and the schedule should not quietly move if that
+# ever changes. Needs systemd >= 250; AL2023 ships 252.
+OnCalendar=*-*-* 08:20:00 America/Los_Angeles
+# Fire on the next boot if the box was asleep at 08:20:00.
+Persistent=true
+# Small jitter so job boards do not see an exact-minute hit; well inside the
+# ten-minute gap to the next agent.
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

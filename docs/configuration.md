@@ -161,25 +161,8 @@ the only module that knows Langfuse exists.
 | `LANGFUSE_HIDE_CONTENT` | `false` | Masks prompts and completions, keeping the call tree, latencies, and token counts. |
 
 Traces carry prompts and completions, **including the résumé profile in the
-system prompt** — `LANGFUSE_HIDE_CONTENT` is the answer to that, and the
-counterpart of LangSmith's `HIDE_` pair below. See
+system prompt** — `LANGFUSE_HIDE_CONTENT` is the answer to that. See
 [operations](operations.md#tracing-with-langfuse).
-
-## LangSmith (optional)
-
-Read by LangSmith itself, not by Scout — no code path looks at them. It can run
-alongside Langfuse or instead of it:
-
-| Variable | Notes |
-|---|---|
-| `LANGSMITH_TRACING` | `true` turns on per-node tracing. LangGraph instruments itself. |
-| `LANGSMITH_API_KEY` | `lsv2_pt_…` |
-| `LANGSMITH_PROJECT` | Project name to group traces under. |
-| `LANGSMITH_HIDE_INPUTS` / `LANGSMITH_HIDE_OUTPUTS` | Keep the call tree, latency, and token counts while leaving prompts and completions behind. |
-
-Tracing sends prompts and completions off the machine, **including the résumé
-profile in the system prompt**. The `HIDE_` pair exists for exactly that
-reason.
 
 ## What is not configured here
 

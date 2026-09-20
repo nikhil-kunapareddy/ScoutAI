@@ -7,6 +7,57 @@ first release.
 
 ## [Unreleased]
 
+### Changed
+
+- **The digest is one report per agent, in that agent's own Slack DM.** It used
+  to run every job agent in a single process and post one merged message — and
+  since a process holds one bot token, all of it arrived in whichever app was
+  the default. Now it runs once per agent (`scout digest --agent edu`, or the
+  `AGENT` the unit sets), so each report is posted by its own Slack app and
+  lands in its own conversation.
+
+  On the box that is `scout-digest@.service`, a template beside `scout@.service`
+  reading the same per-agent env file, started by one timer per agent at 08:00,
+  08:10 and 08:20 `America/Los_Angeles`. Staggered because a `t4g.micro` with no
+  swap cannot hold three more Python processes at once, and with the timezone
+  written out — the reader's, not the host's, which is Eastern — so systemd
+  converts and the schedule cannot drift if either is ever re-set.
+
+  `scout stats` reads `scout-digest@*` alongside `scout@*`, and `scout doctor`'s
+  `digest` line now names the agent whose window the report would land in.
+
+- **Which agents have a digest is its own flag, `AgentSpec.in_digest`**, instead
+  of being read off `tailor_with_resume`. The two answer different questions:
+  one prepends the résumé profile, the other means "this agent has something to
+  report every morning". Splitting them is what lets the **Referral Window join
+  the digest** — a daily sweep of every opening across the companies you have a
+  connection at — while staying untailored, and while still being unable to
+  search outside the list, since `search_referral_jobs` remains its only search
+  tool.
+
+  `DIGEST_MAX_ROLES` is per agent now that each runs its own process, and the
+  Referral Window's is set higher: a capped list would break the one claim that
+  agent makes.
+
+- **The digest asks for a fixed layout.** `DIGEST_REQUEST` used to ask only for
+  "one short line on why it fits", so the shape of the report drifted between
+  days and between backends. It now pins the per-role format, forbids inventing
+  a posting date where the source gives none, and leaves the title and date to
+  `run_digest` — which writes them — so a report cannot arrive with two headers.
+
+### Removed
+
+- **LangSmith.** `langsmith` is no longer a declared dependency, `scout doctor`
+  no longer has a `langsmith` line, and the `LANGSMITH_` variables are gone from
+  `.env.example` and the docs. Langfuse — which Scout wires up itself in
+  `core/tracing.py`, and which carries the session, the tags and the reply as
+  the trace output — is the one tracing backend now. `langsmith` still arrives
+  transitively with `langchain-core`, so clear `LANGSMITH_TRACING` from any
+  `.env` that has it; leaving it set traces from the library, not from Scout.
+
+- A dead `SYSTEM_PROMPT` variable in `.env`, left over from before `AgentSpec`
+  carried each agent's prompt. No code path had read it for some time.
+
 ### Added
 
 - Fourteen more companies for the BigTech Agent, taking it to twenty-two: Microsoft,

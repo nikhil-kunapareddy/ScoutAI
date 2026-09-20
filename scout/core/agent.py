@@ -48,6 +48,12 @@ class AgentSpec:
     # Run behind the resume-parser stage, which appends a profile distilled from
     # the user's resume to this agent's instructions. See resume_tailored.py.
     tailor_with_resume: bool = False
+    # Whether this agent has a daily digest of its own: one timer instance, one
+    # process carrying this agent's Slack token, one DM in this agent's window.
+    # Separate from tailor_with_resume because the two answer different
+    # questions — the Referral Window searches a scope rather than a resume, and
+    # still has something to report every morning. See scout/digest.py.
+    in_digest: bool = False
 
 
 class AgentState(MessagesState):

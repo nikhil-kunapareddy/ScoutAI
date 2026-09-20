@@ -36,8 +36,8 @@ Scout  ▸ Three worth a look, ranked against your résumé:
 - **Real sources.** Employers' own public endpoints: Amazon's careers JSON,
   Greenhouse's board API, Workday, Oracle Cloud Recruiting, RSS. Not a scraped
   aggregator.
-- **Shows up on its own.** A daily digest runs every agent and DMs one merged
-  briefing each morning.
+- **Shows up on its own.** Each agent runs a daily digest and DMs its own
+  briefing each morning, in its own Slack window.
 - **Swap models mid-conversation.** `--claude`, `--ollama`, `--llama`. History
   is provider-agnostic, so the thread survives the switch.
 

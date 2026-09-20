@@ -32,8 +32,8 @@ SPEC = AgentSpec(
     name="Referral Window",
     system_prompt=SYSTEM_PROMPT,
     tool_modules=[clock, referrals, referral_jobs],
+    in_digest=True,  # every morning, what is open across the whole list
     # Not tailor_with_resume: what this agent returns is decided by the referral
-    # list, not by how well a role matches the résumé — and that flag is also
-    # what puts an agent in the daily digest, which searches every source rather
-    # than a scope.
+    # list, not by how well a role matches the résumé. Its digest is the list
+    # swept once a day, which is the scope — not every source ranked by fit.
 )

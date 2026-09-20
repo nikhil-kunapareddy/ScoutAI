@@ -1,0 +1,37 @@
+# One agent's daily digest, named by agent key: scout-digest@bigtech,
+# scout-digest@edu, scout-digest@referral.
+#
+# One process per agent, exactly as scout@.service runs the bots, and for the
+# same reason: the report is DM'd with that agent's own Slack token, so each
+# lands in its own conversation. A single process can only ever hold one bot's
+# token, which is why the reports used to arrive stacked in one window.
+#
+# Started by a timer per agent (scout-digest-<key>.timer), staggered rather
+# than fired together: the box is a t4g.micro with no swap, and three of these
+# at once alongside the three bots would not fit.
+[Unit]
+Description=ScoutAI daily job digest (%i)
+After=network-online.target
+Wants=network-online.target
+# A failure here DMs the user. The digest catches its own agent's failures and
+# reports them in the message, so this fires for what happens around that —
+# missing configuration, an unimportable package, a killed process.
+OnFailure=scout-alert@%n.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/opt/scout/app
+# The same two files, in the same order, as scout@.service: the shared one
+# holds the API keys and limits, the per-agent one holds this agent's Slack
+# token pair. That second file is what puts the digest in the right window.
+# The dash means a missing per-agent file is not an error, so an agent whose
+# tokens come from the rsynced .env.<key> still runs.
+EnvironmentFile=/opt/scout/scout.env
+EnvironmentFile=-/opt/scout/scout-%i.env
+Environment=AGENT=%i
+# A digest sweeps every source in one turn, so it needs more hops than a chat
+# reply. Set here rather than in scout.env so the bots keep their own tighter
+# limit.
+Environment=MAX_TOOL_HOPS=8
+ExecStart=/opt/scout/venv/bin/python -m scout.digest
