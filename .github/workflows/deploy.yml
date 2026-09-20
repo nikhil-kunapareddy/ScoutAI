@@ -1,0 +1,105 @@
+name: Deploy
+
+# Merging to main deploys, but only once CI has gone green on that exact commit
+# — which is why this is its own workflow on `workflow_run` rather than a job in
+# ci.yml: that workflow cancels in-progress runs per ref, and a deploy is the
+# one thing that must never be cancelled halfway.
+#
+# There is no SSH key and no open port. The job assumes an AWS role by OIDC and
+# calls SSM Run Command, which reaches the box through the agent's outbound
+# connection. The role it assumes (ScoutGitHubDeploy) may do exactly one thing:
+# run a command document on one instance.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to deploy (defaults to the tip of main)
+        required: false
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token this trades for AWS credentials
+
+# Never two deploys at once, and never cancel one that has started: the box is
+# mid-restart and the second run would fight the first.
+concurrency:
+  group: deploy-bot-host
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  INSTANCE_ID: i-0e512745024356371
+
+jobs:
+  deploy:
+    name: ship to the bot host
+    # A failed CI run also fires workflow_run; deploying it is the thing this
+    # whole setup exists to prevent.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Which commit
+        id: target
+        run: |
+          sha="${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying $sha"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::051370879922:role/ScoutGitHubDeploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run the update script on the box
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          # The script comes out of the commit being deployed rather than off
+          # the box, so the deploy procedure is never older than what it is
+          # deploying — and the box needs nothing installed ahead of time.
+          remote=$(cat <<EOF
+          set -euo pipefail
+          runuser -u ec2-user -- git -C /opt/scout/app fetch --quiet origin main
+          runuser -u ec2-user -- git -C /opt/scout/app show $SHA:deploy/update.sh > /tmp/scout-update.sh
+          chmod +x /tmp/scout-update.sh
+          /tmp/scout-update.sh $SHA
+          EOF
+          )
+
+          # Built as JSON, not the shorthand: `commands=` is a comma-separated
+          # list to the CLI's shorthand parser, which a shell script is not.
+          jq -n --arg cmd "$remote" \
+            '{commands: [$cmd], executionTimeout: ["900"]}' > /tmp/params.json
+
+          command_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${SHA:0:7}" \
+            --parameters file:///tmp/params.json \
+            --query Command.CommandId --output text)
+          echo "SSM command $command_id"
+
+          # The invocation takes a moment to exist; waiting on it too early is
+          # an InvocationDoesNotExist, not a failed deploy.
+          sleep 5
+
+          # `wait command-executed` exits non-zero on anything but Success, so
+          # the log is printed either way before the step decides.
+          status=0
+          aws ssm wait command-executed \
+            --command-id "$command_id" --instance-id "$INSTANCE_ID" || status=$?
+
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text >&2
+
+          exit $status
