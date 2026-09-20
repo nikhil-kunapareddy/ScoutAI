@@ -66,6 +66,11 @@ app "$VENV/bin/pip" install -q -r "$APP/requirements.txt"
 cp "$APP"/deploy/*.service "$APP"/deploy/*.timer /etc/systemd/system/
 systemctl daemon-reload
 
+# ...and copying that timer is not enabling it. Same check deploy.sh runs, out
+# of the same file, so the CI route and the laptop route cannot disagree.
+echo "==> Timers"
+bash "$APP/deploy/timer-check.sh" "$APP/deploy"
+
 echo "==> Restarting ${#UNITS[@]} bot(s)"
 if ! restart_and_check "${UNITS[@]}"; then
   echo "==> A bot did not come up. Rolling back to $PREV" >&2
