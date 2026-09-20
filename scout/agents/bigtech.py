@@ -50,7 +50,7 @@ SPEC = AgentSpec(
     system_prompt=SYSTEM_PROMPT,
     # No referrals_read, by request: this agent ranks on fit and recency, and
     # the referral list is the Referral Window's scope rather than a tiebreak
-    # here. Edu still reads it — dropping it is per-agent, not a rule change.
+    # here. Same for Edu — no job agent holds a referral tool.
     tool_modules=[clock, location,
                   # one module per source; the shared platforms take a company name
                   amazon, google, netflix, lenovo, microsoft, apple, oracle, uber,
