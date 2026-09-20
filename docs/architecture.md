@@ -225,9 +225,12 @@ first — most of them exist because the alternative broke something subtle.
   `RunnableConfig | None` stops LangChain recognising it: the injection quietly
   stops and `config` reappears as a parameter the model is asked to fill — with
   a user id in it.
-- **Job agents get `referrals_read`, never `referrals`.** Only the Referral
-  Window may write. A searching agent with `add_referral` in reach eventually
-  records something mid-search that the user never asked for.
+- **Job agents hold no referral tool at all.** Not `referrals`, and since
+  2026-09-19 not `referrals_read` either: they rank on fit and recency, and the
+  list is the Referral Window's scope rather than a tiebreak in someone else's
+  search. The read-only view stays in the tree for a future agent that needs
+  one — a searching agent with `add_referral` in reach eventually records
+  something mid-search that the user never asked for.
 - **The Referral Window searches, but only inside the list.** It holds
   `search_referral_jobs` and none of the per-source tools, which is what makes
   the previous rule survive an agent that both writes the list and searches: it

@@ -230,10 +230,11 @@ in the reply is a role you could ask someone about. It also says what it could
 sources, the hosted boards, and the two universities — but not, say, Meta or
 Palantir). A gap gets named rather than quietly reading as "nothing open".
 
-The job agents read the same list and cannot edit it, which is the point: a
-searching agent with write access eventually records something you never asked
-for. They search by *source* and use the list to rank; the Referral Window
-searches by *company* and uses the list as its scope.
+The job agents do not see this list at all. They search by *source* and rank on
+fit and recency; the Referral Window searches by *company* and uses the list as
+its scope. Keeping the two apart is the point — one question is "what is open
+where I might fit", the other is "what is open where I know someone", and only
+the second one is this list's business.
 
 The list lives in `state/referrals.json`. `--reset` does not touch it, and
 neither does a redeploy.

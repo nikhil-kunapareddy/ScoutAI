@@ -4,9 +4,10 @@ Scout is a multi-agent platform for Slack DM bots, built on **LangGraph**. An
 agent = a system prompt + a set of tools, running on Claude (default), Ollama, or
 the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
 with it, both tailored to the user's resume in `data/`, plus a Referral Window
-that keeps the list of companies the user has a connection at — which the job
-agents read when they rank results, and which the Window itself searches as a
-scope, so its answer is every opening the user could ask a referral for.
+that keeps the list of companies the user has a connection at and searches it
+as a scope, so its answer is every opening the user could ask a referral for.
+The job agents do not see that list: they rank on fit and recency, and who the
+user knows somewhere is the Window's question.
 
 `README.md` is the short, outward-facing intro; `docs/` is every other document
 — the user-facing set (`getting-started`, `configuration`, `architecture`,
@@ -198,9 +199,13 @@ Three seams hold the layers apart — keep them intact:
   disposable — `--reset` drops a thread — but the list is something the user
   typed once. It is JSON in `state/`, which `deploy.sh` excludes from its rsync,
   so a redeploy can't overwrite the box's copy with a laptop's.
-- **Job agents get `referrals_read`, never `referrals`.** Only the Referral
-  Window may write. A searching agent with `add_referral` in reach eventually
+- **Job agents hold no referral tool at all.** Not `referrals`, and since
+  2026-09-19 not `referrals_read` either: they rank on fit and recency, and the
+  list is the Referral Window's scope rather than a tiebreak in someone else's
+  search. `referrals_read` stays as the read-only view to give a future agent
+  that needs one — a searching agent with `add_referral` in reach eventually
   records something mid-search that the user never asked for.
+  `test_the_job_agents_do_not_see_the_list_at_all` guards it.
 - **The Referral Window searches only within the list.** It writes the list *and*
   searches, which the rule above would otherwise forbid; what makes it safe is
   that its single search tool is `search_referral_jobs`, so there is nothing to

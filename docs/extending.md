@@ -234,8 +234,10 @@ That is the whole change. Three things follow from it automatically:
   its agents from that flag rather than from a list. On the box it also needs a
   timer instance (`scout-digest-<key>.timer`, copied from an existing one), so
   the report is DM'd by that agent's own Slack app rather than another's.
-- Give it `referrals_read`, not `referrals`. Only the Referral Window writes to
-  that list — and it can afford to, because the only search tool it holds is
+- Give it no referral tool unless ranking by referrals is the point of it. The
+  shipped job agents hold none; if yours should read the list, give it
+  `referrals_read` and never `referrals`. Only the Referral Window writes — and
+  it can afford to, because the only search tool it holds is
   `search_referral_jobs`, which cannot look outside the list.
 - If the source is a company board, add it to `jobs/directory.py` too, so a
   referral there becomes searchable. Companies on a hosted platform — Greenhouse,
