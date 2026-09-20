@@ -24,13 +24,21 @@ from typing import NamedTuple
 
 from . import (
     amazon,
+    apple,
     ashby,
+    bloomberg,
     boston_university,
+    cisco,
     google,
     greenhouse,
     lenovo,
+    microsoft,
     netflix,
     northeastern,
+    oracle,
+    smartrecruiters,
+    uber,
+    workday,
 )
 from .posting import Searcher
 
@@ -48,13 +56,19 @@ class CompanySource(NamedTuple):
 
 
 #: Normalised company name -> its board. The multi-company platforms contribute
-#: everyone they host, so a line in ``greenhouse.BOARDS`` or ``ashby.BOARDS`` is
-#: also a line here.
+#: everyone they host, so a line in ``greenhouse.BOARDS``, ``ashby.BOARDS``,
+#: ``smartrecruiters.BOARDS`` or ``workday.TENANTS`` is also a line here.
 SOURCES: dict[str, CompanySource] = {
     "amazon": CompanySource("Amazon", partial(amazon.search, days=WINDOW_DAYS)),
     "google": CompanySource("Google", google.search),
     "netflix": CompanySource("Netflix", netflix.search),
     "lenovo": CompanySource("Lenovo", lenovo.search),
+    "microsoft": CompanySource(microsoft.ORGANIZATION, microsoft.search),
+    "apple": CompanySource(apple.ORGANIZATION, apple.search),
+    "oracle": CompanySource(oracle.ORGANIZATION, oracle.search),
+    "uber": CompanySource(uber.ORGANIZATION, uber.search),
+    "cisco": CompanySource(cisco.ORGANIZATION, cisco.search),
+    "bloomberg": CompanySource(bloomberg.ORGANIZATION, bloomberg.search),
     "northeastern university": CompanySource(
         northeastern.ORGANIZATION, northeastern.search
     ),
@@ -68,6 +82,14 @@ SOURCES: dict[str, CompanySource] = {
     **{
         slug: CompanySource(name, ashby.BOARD.searcher(slug))
         for slug, name in ashby.BOARDS.items()
+    },
+    **{
+        slug: CompanySource(name, smartrecruiters.BOARD.searcher(slug))
+        for slug, name in smartrecruiters.BOARDS.items()
+    },
+    **{
+        slug: CompanySource(site.organization, site.searcher())
+        for slug, site in workday.TENANTS.items()
     },
 }
 
@@ -83,6 +105,12 @@ ALIASES = {
     "northeastern": "northeastern university",
     "neu": "northeastern university",
     "bu": "boston university",
+    # The Greenhouse slug is the board's, not the company's: nobody writes
+    # "DoorDash USA", and the bare "doordash" board does not exist.
+    "doordash": "doordashusa",
+    "msft": "microsoft",
+    "sfdc": "salesforce",
+    "salesforce com": "salesforce",
 }
 
 #: Dropped before matching — nobody's board is registered under "Inc".

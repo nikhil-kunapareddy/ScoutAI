@@ -119,13 +119,26 @@ Two rules worth repeating, because both are about the model's experience:
 - **`None` and `[]` are different answers.** "I couldn't reach it" and "there is
   nothing there" lead the model to different next moves.
 
-If the company is hosted on **Greenhouse or Ashby**, you do not need a module at
-all — add a line to `BOARDS` in `scout/tools/jobs/greenhouse.py` or `ashby.py`.
-That is one platform, not one source, and the line reaches `directory.py` on its
-own. A *new* multi-company platform is a `HostedBoard`: give it the board URL,
-the JSON key its openings sit under, its `BOARDS`, and a function that reads one
-row — the slug lookup, the fetch, and the three replies a board tool owes (unknown
+If the company is hosted on **Greenhouse, Ashby or SmartRecruiters**, you do not
+need a module at all — add a line to `BOARDS` in the platform's module. That is
+one platform, not one source, and the line reaches `directory.py` on its own.
+**Workday** is the same deal with a different shape: add a `WorkdayTenant` to
+`TENANTS` in `workday.py`, giving it the host, tenant, site and the id its
+country facet uses for the United States. (That facet's *name* is per-tenant —
+NVIDIA calls it `locationHierarchy1`, Adobe `locationCountry`, Salesforce a
+seventy-character custom field — so read it off the live response rather than
+copying another tenant's.)
+
+A *new* multi-company platform is a `HostedBoard`: give it the board URL, the
+JSON key its openings sit under, its `BOARDS`, and a function that reads one row
+— the slug lookup, the fetch, and the three replies a board tool owes (unknown
 company, board down, board empty) are already written.
+
+If the rows are **nested** below the top level, reach for `fetch.get_json` or
+`fetch.post_json` and navigate the body yourself, rather than teaching `fetch`
+another shape. Do decide deliberately what a *missing* key means: for Oracle it
+means the request lost its `expand` and the board returned no postings at all,
+which is "unreachable", not "nothing open".
 
 ## A tool
 
@@ -222,8 +235,10 @@ That is the whole change. Three things follow from it automatically:
   that list — and it can afford to, because the only search tool it holds is
   `search_referral_jobs`, which cannot look outside the list.
 - If the source is a company board, add it to `jobs/directory.py` too, so a
-  referral there becomes searchable. Greenhouse companies land there on their
-  own.
+  referral there becomes searchable. Companies on a hosted platform — Greenhouse,
+  Ashby, SmartRecruiters, Workday — land there on their own. Add an alias when
+  the board's slug is not the name anyone types: `doordashusa` is the board,
+  "DoorDash" is the company.
 
 Each agent is a separate Slack app, so it needs its own token pair in
 `.env.startup` and its own `CHECKPOINT_DB`. See
