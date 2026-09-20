@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..core.agent import AgentSpec
-from ..tools import clock, location, referrals_read
+from ..tools import clock, location
 from ..tools.jobs import (
     amazon,
     apple,
@@ -38,11 +38,9 @@ SYSTEM_PROMPT = (
     "Two sources cannot give you a posting date: the Workday companies report only "
     "how long ago a role went up, and Bloomberg publishes nothing at all. Repeat "
     "what the tool tells you and never invent a date. "
-    "Before presenting results, call list_referrals: the user keeps a list of "
-    "companies where they have a connection, and a role at one of those is worth "
-    "more to them than a slightly better-matched role somewhere they know nobody. "
-    "Put those first and say which ones they are. Never edit that list — the "
-    "Referral Window agent owns it. "
+    "You do not see the user's referral list and never rank by it: rank on fit "
+    "and recency alone. Who they know somewhere is the Referral Window's "
+    "question, and it answers it across the whole list in one pass. "
     "Keep replies short and Slack-friendly."
 )
 
@@ -50,9 +48,13 @@ SPEC = AgentSpec(
     key="bigtech",
     name="BigTech Agent",
     system_prompt=SYSTEM_PROMPT,
-    tool_modules=[clock, location, referrals_read,
+    # No referrals_read, by request: this agent ranks on fit and recency, and
+    # the referral list is the Referral Window's scope rather than a tiebreak
+    # here. Same for Edu — no job agent holds a referral tool.
+    tool_modules=[clock, location,
                   # one module per source; the shared platforms take a company name
                   amazon, google, netflix, lenovo, microsoft, apple, oracle, uber,
                   cisco, bloomberg, greenhouse, ashby, smartrecruiters, workday],
     tailor_with_resume=True,  # supplies the candidate profile the prompt expects
+    in_digest=True,           # sweeps every source into its own morning DM
 )  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)

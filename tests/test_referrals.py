@@ -9,7 +9,7 @@ import pytest
 from scout.agents import AGENTS, get_spec
 from scout.core import referrals, settings
 from scout.core.referrals import Referral, ReferralStoreError
-from scout.digest import job_agents
+from scout.digest import digest_agents
 from scout.tools import referrals as referral_tools
 from scout.tools import referrals_read
 
@@ -186,15 +186,23 @@ def test_a_broken_store_is_reported_not_raised(store) -> None:
 # --- Who may write --------------------------------------------------------
 
 
-def test_job_agents_get_the_read_only_view() -> None:
-    """A searching agent must not decide to record a referral on its own."""
+def test_the_read_only_view_is_still_read_only() -> None:
+    """Kept as the view a searching agent would get, if one is ever given the
+    list again: whatever holds it can read and never write."""
     assert set(registered_tools(referrals_read)) == {"list_referrals"}
 
+
+def test_the_job_agents_do_not_see_the_list_at_all() -> None:
+    """Asked for: both job agents rank on fit and recency, never on referrals.
+
+    Stronger than "they may not write it" — they hold no referral tool of any
+    kind, so there is nothing for a prompt to disagree with and nothing for the
+    model to consult. Who the user knows somewhere is the Referral Window's
+    question, and the list is that window's search scope.
+    """
     for key in ("bigtech", "edu"):
         names = set(registered_tools(*get_spec(key).tool_modules))
-        assert "list_referrals" in names, key
-        assert "add_referral" not in names, key
-        assert "remove_referral" not in names, key
+        assert not {name for name in names if "referral" in name}, key
 
 
 def test_the_referral_window_owns_the_writes() -> None:
@@ -213,11 +221,22 @@ def test_both_views_render_a_list_identically() -> None:
 # --- Where it does and does not belong ------------------------------------
 
 
-def test_the_referral_window_is_not_a_digest_agent() -> None:
-    """tailor_with_resume is what puts an agent in the digest; a CRUD window
-    has nothing to report daily."""
+def test_the_referral_window_has_its_own_digest() -> None:
+    """``in_digest`` is the marker, and it is not ``tailor_with_resume``: the
+    window searches a scope rather than a résumé, and a list of who is hiring
+    among your connections is exactly a thing to read each morning."""
+    assert "referral" in {spec.key for spec in digest_agents()}
     assert AGENTS["referral"].tailor_with_resume is False
-    assert "referral" not in {spec.key for spec in job_agents()}
+
+
+def test_the_referral_digest_cannot_wander_off_the_list() -> None:
+    """A digest asks the agent to search everything it covers, so the scope has
+    to come from the tool set rather than from the wording of the request."""
+    names = set(registered_tools(*get_spec("referral").tool_modules))
+
+    assert {name for name in names if name.startswith("search")} == {
+        "search_referral_jobs"
+    }
 
 
 def test_referral_renders_without_optional_fields() -> None:

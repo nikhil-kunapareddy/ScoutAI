@@ -27,10 +27,11 @@ from scout.core.agent import AgentSpec
 from scout.tools import build_registry
 from scout.tools.jobs import fetch as jobs_fetch
 
-# Importing ``scout.core.settings`` loads the developer's ``.env``, which may
-# switch LangSmith tracing on — and a test run must not ship anything to a
-# hosted service. Switched off here, after the import that could enable it, so
-# the suite behaves the same on a laptop as it does in CI.
+# Scout no longer supports LangSmith, but ``langsmith`` still arrives with
+# ``langchain-core`` and reads these names itself — so a developer whose ``.env``
+# still has them would ship traces from a test run. Pinned off here, after the
+# import that could enable it, so the suite behaves the same on a laptop as in
+# CI. This is a belt on someone else's braces; nothing in ``scout`` reads them.
 for _tracing in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
     os.environ[_tracing] = "false"
 

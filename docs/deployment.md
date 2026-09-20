@@ -50,7 +50,8 @@ several times more. Your model bill will dwarf all of it.
 |---|---|
 | `deploy.sh` | rsync the working tree, install deps, refresh units, restart every enabled instance |
 | `scout@.service` | the bot, one instance per agent (`scout@bigtech`, `scout@edu`) |
-| `scout-digest.service` / `.timer` | the daily digest, 08:00 local |
+| `scout-digest@.service` | the daily digest, one instance per agent, posting as that agent |
+| `scout-digest-<key>.timer` | when each agent's digest runs — 08:00, 08:10, 08:20 `America/Los_Angeles` |
 | `scout-alert@.service` | DMs you when a unit fails |
 
 ```bash
@@ -81,6 +82,10 @@ SLACK_APP_TOKEN=xapp-…
 CHECKPOINT_DB=/opt/scout/state/edu.sqlite
 ```
 
+Both `scout@` and `scout-digest@` read the same two files in the same order,
+which is what makes the digest land in the right window: the per-agent file is
+where that agent's bot token comes from.
+
 They win over the `.env` that was copied up, because `load_dotenv()` leaves
 existing environment variables alone. The per-instance file is optional (the
 leading `-` in the unit) and wins on a duplicate key.
@@ -88,8 +93,27 @@ leading `-` in the unit) and wins on a duplicate key.
 ```bash
 sudo systemctl enable --now scout@bigtech
 sudo systemctl enable --now scout@edu
-sudo systemctl enable --now scout-digest.timer
+sudo systemctl enable --now scout@referral
+
+sudo systemctl enable --now scout-digest-bigtech.timer
+sudo systemctl enable --now scout-digest-edu.timer
+sudo systemctl enable --now scout-digest-referral.timer
 ```
+
+**Why three timers and not one.** Each digest posts with its own agent's Slack
+token, so it has to be its own process — which is what puts each report in its
+own DM instead of stacking them into whichever app was the default. And they
+are ten minutes apart rather than simultaneous: this box has 916 MB and no
+swap, the three bots are already resident at ~130 MB each, and three more
+Python processes at once would not fit. A run finishes in well under a minute.
+
+The schedule names its timezone (`OnCalendar=*-*-* 08:00:00 America/Los_Angeles`)
+rather than inheriting the host's, and deliberately is not the host's: the
+instance runs on `America/New_York`, the digest is read in California. systemd
+does the conversion, including across a daylight-saving change, so the DM
+arrives at 08:00 Pacific whatever the box is set to. Needs systemd ≥ 250;
+AL2023 ships 252 — check one with
+`systemd-analyze calendar '*-*-* 08:00:00 America/Los_Angeles'`.
 
 `deploy.sh` reads the enabled instances out of systemd's wants directory, so a
 new agent joins the deploy by being enabled — nothing in the script needs

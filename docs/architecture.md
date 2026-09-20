@@ -201,7 +201,8 @@ is what lets a user switch model mid-conversation.
 | **Retry inside the model node** | A node that raises commits nothing, so the fallback starts clean while keeping tool results the turn already fetched. |
 | **Tools never raise on expected failure** | A dead job board returns a sentence the model can read and act on, not a stack trace. |
 | **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, a scraped page. What they *do* share is split by job into `fetch`, `feeds`, `posting` and `relevance`, and a platform that hosts many companies is one shape rather than one module each — `HostedBoard` for Greenhouse, Ashby and SmartRecruiters, `WorkdayTenant` for the Workday sites. |
-| **The digest derives its agents** | `tailor_with_resume` is the marker, so a new job agent joins tomorrow's digest by existing. There is no second registry to keep in step. |
+| **The digest derives its agents** | `in_digest` is the marker, so a new job agent joins tomorrow's digest by existing. There is no second registry to keep in step. It is its own flag rather than a read of `tailor_with_resume`: the Referral Window searches a scope instead of a résumé, and still has a morning report. |
+| **One digest per agent, one DM per window** | A process carries one agent's Slack token, so the digest runs once per agent and each report lands in that bot's own conversation. Merging them would mean posting every agent's work as whichever app happened to be the default. |
 | **Cost is measured, not guessed** | One `turn …` line per turn records latency, hops, and token usage — which is how we found that a trivial reply costs 14.5k input tokens. |
 | **Observability is a config, not a code path** | `GraphRunner.respond` hands its run config to `tracing.observed` and gets back either an instrumented one or the one it already had, so a traced turn and an untraced turn take the same path. Nothing else in the package imports Langfuse. |
 
@@ -224,9 +225,12 @@ first — most of them exist because the alternative broke something subtle.
   `RunnableConfig | None` stops LangChain recognising it: the injection quietly
   stops and `config` reappears as a parameter the model is asked to fill — with
   a user id in it.
-- **Job agents get `referrals_read`, never `referrals`.** Only the Referral
-  Window may write. A searching agent with `add_referral` in reach eventually
-  records something mid-search that the user never asked for.
+- **Job agents hold no referral tool at all.** Not `referrals`, and since
+  2026-09-19 not `referrals_read` either: they rank on fit and recency, and the
+  list is the Referral Window's scope rather than a tiebreak in someone else's
+  search. The read-only view stays in the tree for a future agent that needs
+  one — a searching agent with `add_referral` in reach eventually records
+  something mid-search that the user never asked for.
 - **The Referral Window searches, but only inside the list.** It holds
   `search_referral_jobs` and none of the per-source tools, which is what makes
   the previous rule survive an agent that both writes the list and searches: it
