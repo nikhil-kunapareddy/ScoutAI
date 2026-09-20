@@ -178,6 +178,9 @@ language:
 
 - *"latest amazon jobs"* — recent Amazon AI/ML roles, with links and dates.
 - *"anything at databricks or stripe?"* — their Greenhouse boards.
+- *"any ML roles at anthropic or openai?"* — hosted boards too, by name.
+- *"what's new at nvidia?"* — its Workday site (which reports "Posted 5
+  Days Ago" rather than a date, so no date is shown).
 - *"what google roles are open?"* — newest first (Google publishes no dates, so
   none are shown).
 - *"what time is it?"* / *"where am I?"* — the small tools, useful for checking
@@ -224,9 +227,9 @@ That last one is what the list is for. The Referral Window searches every
 company on it in a single pass and answers with one merged list — so everything
 in the reply is a role you could ask someone about. It also says what it could
 *not* see: a careers board that was down, and any company Scout has no board for
-(it covers Amazon, Google, Netflix, Lenovo, WHOOP, the Greenhouse-hosted
-companies, and the two universities). A gap gets named rather than quietly
-reading as "nothing open".
+(it covers the twenty-odd companies the job agents search — the big-tech
+sources, the hosted boards, and the two universities — but not, say, Meta or
+Palantir). A gap gets named rather than quietly reading as "nothing open".
 
 The job agents read the same list and cannot edit it, which is the point: a
 searching agent with write access eventually records something you never asked

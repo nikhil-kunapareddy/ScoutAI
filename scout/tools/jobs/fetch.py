@@ -42,6 +42,38 @@ def post_rows(url: str, key: str, payload: Params) -> list[dict] | None:
     return _rows(_post(url, payload), key)
 
 
+def get_json(url: str, params: Params | None = None) -> object | None:
+    """A decoded JSON body, or None if the source can't be reached.
+
+    ``get_rows`` covers the common case — rows under a top-level key — but three
+    sources bury theirs (Microsoft under ``data``, Cisco under
+    ``refineSearch.data``, Oracle under ``items[0]``). Rather than teach this
+    module every shape, they take the body and navigate it themselves, which is
+    also where the judgement lives: for Oracle a *missing* key means the request
+    was built wrong and the answer is "unreachable", not "nothing open".
+    """
+    response = _get(url, params, _JSON_ACCEPT)
+    if response is None:
+        return None
+    try:
+        body: object = response.json()
+    except Exception:
+        return None
+    return body
+
+
+def post_json(url: str, payload: Params) -> object | None:
+    """As ``get_json``, for an endpoint that takes its query in the body."""
+    response = _post(url, payload)
+    if response is None:
+        return None
+    try:
+        body: object = response.json()
+    except Exception:
+        return None
+    return body
+
+
 def json_rows(payload: object, key: str) -> list[dict]:
     """The rows under ``key`` in a decoded JSON body, or [] if it isn't shaped
     that way.

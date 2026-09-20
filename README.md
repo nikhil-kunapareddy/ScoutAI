@@ -34,7 +34,8 @@ Scout  ▸ Three worth a look, ranked against your résumé:
 - **Tailored, not generic.** A résumé-parsing agent distils your background
   once, and every search is run against it — no re-uploading, no re-explaining.
 - **Real sources.** Employers' own public endpoints: Amazon's careers JSON,
-  Greenhouse's board API, Workday, RSS. Not a scraped aggregator.
+  Greenhouse's board API, Workday, Oracle Cloud Recruiting, RSS. Not a scraped
+  aggregator.
 - **Shows up on its own.** A daily digest runs every agent and DMs one merged
   briefing each morning.
 - **Swap models mid-conversation.** `--claude`, `--ollama`, `--llama`. History
@@ -44,7 +45,7 @@ Scout  ▸ Three worth a look, ranked against your résumé:
 
 | | Agent | What it searches |
 |:--:|---|---|
-| <img src="assets/bigtech.png" width="46" alt=""> | **BigTech Agent** | Amazon, Google, Netflix, Lenovo, WHOOP, and Greenhouse-hosted boards — Databricks, Airbnb, Stripe, Pinterest, Reddit, Coinbase, Dropbox, Robinhood |
+| <img src="assets/bigtech.png" width="46" alt=""> | **BigTech Agent** | Amazon, Google, Microsoft, Apple, NVIDIA, Oracle, Salesforce, Adobe, Uber, Cisco, Bloomberg, ServiceNow, Netflix, Lenovo, and the hosted boards — Databricks, Stripe, Anthropic, OpenAI, Snowflake, DoorDash, Airbnb, Pinterest, Reddit, Coinbase, Dropbox, Robinhood, WHOOP |
 | <img src="assets/edu.png" width="46" alt=""> | **Edu Agent** | Northeastern University, Boston University |
 | <img src="assets/referral.png" width="46" alt=""> | **Referral Window** | Only the companies you have a connection at — it keeps that list, and searches every board on it in one pass, naming the ones it couldn't check |
 

@@ -40,13 +40,22 @@ scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (Agen
                             │                      as a search scope)
                             └── jobs/            one module per source, over
                                 │                    fetch / feeds / posting /
-                                │                    relevance / hosted_board
+                                │                    relevance / hosted_board /
+                                │                    workday
                                 ├── amazon.py            search_amazon_jobs
                                 ├── google.py            search_google_jobs
                                 ├── netflix.py           search_netflix_jobs
                                 ├── lenovo.py            search_lenovo_jobs
+                                ├── microsoft.py         search_microsoft_jobs
+                                ├── apple.py             search_apple_jobs
+                                ├── oracle.py            search_oracle_jobs
+                                ├── uber.py              search_uber_jobs
+                                ├── cisco.py             search_cisco_jobs
+                                ├── bloomberg.py         search_bloomberg_jobs
                                 ├── greenhouse.py        search_greenhouse_jobs
                                 ├── ashby.py             search_ashby_jobs
+                                ├── smartrecruiters.py   search_smartrecruiters_jobs
+                                ├── workday.py           search_workday_jobs
                                 ├── northeastern.py      search_northeastern_jobs
                                 ├── boston_university.py search_boston_university_jobs
                                 └── directory.py         company -> board, for the
@@ -191,7 +200,7 @@ is what lets a user switch model mid-conversation.
 | **A hop limit that repairs itself** | When a turn exhausts its tool budget, the abandoned tool calls are answered before the apology is recorded. Skipping that breaks the user's *next* message, not just this one. |
 | **Retry inside the model node** | A node that raises commits nothing, so the fallback starts clean while keeping tool results the turn already fetched. |
 | **Tools never raise on expected failure** | A dead job board returns a sentence the model can read and act on, not a stack trace. |
-| **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, one scraped page. What they *do* share is split by job into `fetch`, `feeds`, `posting` and `relevance`, and a platform that hosts many companies (Greenhouse, Ashby) is one `HostedBoard` rather than one module each. |
+| **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, a scraped page. What they *do* share is split by job into `fetch`, `feeds`, `posting` and `relevance`, and a platform that hosts many companies is one shape rather than one module each — `HostedBoard` for Greenhouse, Ashby and SmartRecruiters, `WorkdayTenant` for the Workday sites. |
 | **The digest derives its agents** | `tailor_with_resume` is the marker, so a new job agent joins tomorrow's digest by existing. There is no second registry to keep in step. |
 | **Cost is measured, not guessed** | One `turn …` line per turn records latency, hops, and token usage — which is how we found that a trivial reply costs 14.5k input tokens. |
 | **Observability is a config, not a code path** | `GraphRunner.respond` hands its run config to `tracing.observed` and gets back either an instrumented one or the one it already had, so a traced turn and an untraced turn take the same path. Nothing else in the package imports Langfuse. |

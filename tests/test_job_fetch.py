@@ -110,3 +110,40 @@ def test_json_endpoints_ask_for_json(stub) -> None:
 
     assert fake.calls[0]["headers"]["Accept"] == "application/json"
     assert "Accept" not in fake.calls[1]["headers"]  # a feed or a page, not JSON
+
+
+# --- Whole bodies, for the sources whose rows are nested ------------------
+
+
+class Undecodable(FakeResponse):
+    """A response whose body will not parse — a board answering with an error page."""
+
+    def json(self) -> dict:
+        raise ValueError("not json")
+
+
+def test_a_whole_body_comes_back_decoded(stub) -> None:
+    """Three sources bury their rows, so they navigate the body themselves."""
+    fake = stub(FakeRequests(FakeResponse({"data": {"positions": [{"name": "MLE"}]}})))
+    assert fetch.get_json(URL) == {"data": {"positions": [{"name": "MLE"}]}}
+    assert fake.calls[0]["url"] == URL
+
+
+def test_a_posted_body_comes_back_decoded(stub) -> None:
+    stub(FakeRequests(FakeResponse({"refineSearch": {"data": {"jobs": []}}})))
+    assert fetch.post_json(URL, {"q": "ml"}) == {"refineSearch": {"data": {"jobs": []}}}
+
+
+@pytest.mark.parametrize("post", [False, True], ids=["get", "post"])
+def test_an_unreachable_body_is_none(stub, post: bool) -> None:
+    stub(FakeRequests(error=OSError("down")))
+    body = fetch.post_json(URL, {}) if post else fetch.get_json(URL)
+    assert body is None
+
+
+@pytest.mark.parametrize("post", [False, True], ids=["get", "post"])
+def test_a_body_that_will_not_decode_is_none(stub, post: bool) -> None:
+    """Microsoft answers a rate-limited request with plain text, not JSON."""
+    stub(FakeRequests(Undecodable()))
+    body = fetch.post_json(URL, {}) if post else fetch.get_json(URL)
+    assert body is None

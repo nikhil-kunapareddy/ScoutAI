@@ -26,6 +26,8 @@ BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/{slug}"
 # Board slug -> display name. Add a company = add a line. All verified live.
 BOARDS = {
     "whoop": "WHOOP",
+    "openai": "OpenAI",
+    "snowflake": "Snowflake",
 }
 
 US = "United States"
@@ -95,7 +97,8 @@ def register(reg: ToolRegistry) -> None:
         openings and return title, date posted, and link.
 
         Args:
-            company: Which company to search. Supported: whoop.
+            company: Which company to search. Supported: whoop, openai,
+                snowflake.
             keywords: Optional phrase to narrow titles (e.g. "machine learning").
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
