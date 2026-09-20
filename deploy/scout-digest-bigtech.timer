@@ -10,10 +10,10 @@ Description=Run the BigTech Agent job digest daily
 # The template instance this starts. Named with a hyphen rather than
 # scout-digest@bigtech.timer so it reads as a concrete timer, not a second template.
 Unit=scout-digest@bigtech.service
-# The timezone is written out rather than inherited: the box happens to be set
-# to America/Los_Angeles today, and the schedule should not quietly move if that
-# ever changes. Needs systemd >= 250; AL2023 ships 252.
-OnCalendar=*-*-* 08:00:00 America/Los_Angeles
+# The timezone is written out rather than inherited: the box is set to
+# America/New_York, and the schedule should not quietly move if that ever
+# changes. Needs systemd >= 250; AL2023 ships 252.
+OnCalendar=*-*-* 08:00:00 America/New_York
 # Fire on the next boot if the box was asleep at 08:00:00.
 Persistent=true
 # Small jitter so job boards do not see an exact-minute hit; well inside the
