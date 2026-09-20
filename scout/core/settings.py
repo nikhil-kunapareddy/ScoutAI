@@ -154,9 +154,9 @@ USD_PER_MTOK_OUT = _env_float("USD_PER_MTOK_OUT", 0.0)
 
 # --- Langfuse (agent tracing) ---
 # The full picture of a turn — every node, model call and tool call — grouped by
-# conversation. Unlike the LANGSMITH_ variables, which LangSmith reads itself,
-# these are read by us (see core/tracing.py): the key pair is the switch, and a
-# half-configured pair leaves tracing off rather than half on.
+# conversation. Scout reads these itself (see core/tracing.py) rather than
+# leaving them to the SDK: the key pair is the switch, and a half-configured
+# pair leaves tracing off rather than half on.
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
 # Two names each, because the SDK reads these itself as well, and its own

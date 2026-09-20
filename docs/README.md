@@ -8,6 +8,7 @@
 | **[Extending](extending.md)** | Add a job source, a tool, an agent, or a model provider. |
 | **[Deployment](deployment.md)** | Docker, AWS, GCP, launchd — and what it costs. |
 | **[Operations](operations.md)** | The daily digest, turn metrics, Langfuse tracing, alerts, and what to check when it goes quiet. |
+| **[Technical report](technical-report.pdf)** | The long form, as a paper: architecture, the decision log with costs, failure modes, and the limits. Source: `technical-report.tex`. |
 
 Taking part:
 

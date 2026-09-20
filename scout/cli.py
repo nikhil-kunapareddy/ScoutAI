@@ -1,7 +1,7 @@
 """The command line: one entry point for every way Scout is run.
 
     scout run [--agent KEY]    start the Slack bot for one agent
-    scout digest               run every job agent and DM one merged report
+    scout digest [--agent KEY] run one agent's digest and DM it as that agent
     scout stats [--days N]     read the turn metrics back
     scout agents               list the registered agents and their tools
     scout doctor               check the configuration without connecting
@@ -52,7 +52,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(run=_run)
 
     digest = subcommands.add_parser(
-        "digest", help="run every job agent and DM one merged report"
+        "digest", help="run one agent's digest and DM it as that agent"
+    )
+    # The same --agent as `run`, and for the same reason: the digest is posted
+    # with that agent's own Slack token, so it lands in that bot's DM rather
+    # than stacked into whichever app happened to be the default.
+    digest.add_argument(
+        "--agent",
+        metavar="KEY",
+        help="whose digest to run (default: $AGENT, else bigtech)",
     )
     digest.set_defaults(run=_digest)
 
@@ -108,7 +116,7 @@ def _run(_args: argparse.Namespace) -> int:
 
 
 def _digest(_args: argparse.Namespace) -> int:
-    """Run the daily digest once, now."""
+    """Run the active agent's digest once, now."""
     from .digest import main as run_digest
 
     run_digest()

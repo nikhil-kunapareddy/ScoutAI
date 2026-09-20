@@ -18,8 +18,10 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-#: Units the journal query covers: every bot instance, plus the digest.
-_UNITS = ("scout@*", "scout-digest")
+#: Units the journal query covers: every bot instance, plus every digest
+#: instance. Both are globs because both are systemd templates, one instance
+#: per agent — see deploy/scout@.service and deploy/scout-digest@.service.
+_UNITS = ("scout@*", "scout-digest@*")
 
 
 @dataclass

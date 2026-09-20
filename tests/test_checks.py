@@ -156,6 +156,35 @@ def test_no_digest_recipient_warns(configured, monkeypatch) -> None:
     assert "1 thing worth knowing" in report.render()
 
 
+def test_the_digest_line_names_the_agent_whose_window_it_lands_in(configured) -> None:
+    """One process per agent, posting with that agent's token, so the report is
+    about the agent `doctor` is running as — not about every agent at once."""
+    detail = {c.label: c.detail for c in checks.run().checks}["digest"]
+
+    assert "BigTech Agent" in detail
+    assert "U1" in detail
+
+
+def test_an_agent_without_a_digest_says_so(configured, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ACTIVE_AGENT", "resume")
+
+    report = checks.run()
+
+    assert "has no digest" in report.render()
+    # Not every agent needs one; that is a fact, not a fault.
+    assert levels(report)["digest"] == checks.OK
+
+
+def test_an_unregistered_agent_does_not_break_the_digest_line(
+    configured, monkeypatch
+) -> None:
+    """`_agent` already fails the report for this; the digest line must still
+    render rather than raise on the way there."""
+    monkeypatch.setattr(settings, "ACTIVE_AGENT", "nope")
+
+    assert "has no digest" in checks.run().render()
+
+
 def test_a_configured_checkpoint_db_is_reported_as_a_path(configured, monkeypatch) -> None:
     monkeypatch.setattr(settings, "CHECKPOINT_DB", "state/test.sqlite")
 
@@ -192,27 +221,10 @@ def test_a_configured_llama_key_is_listed_as_available(configured, monkeypatch) 
     assert "ollama (" in detail
 
 
-def test_langsmith_names_the_project_when_it_is_on(configured, monkeypatch) -> None:
-    monkeypatch.setenv("LANGSMITH_TRACING", "true")
-    monkeypatch.setenv("LANGSMITH_PROJECT", "scout-test")
-
-    report = checks.run()
-
-    assert "on, project 'scout-test'" in report.render()
-    assert levels(report)["langsmith"] == checks.OK
-
-
-def test_langsmith_falls_back_to_the_default_project(configured, monkeypatch) -> None:
-    monkeypatch.setenv("LANGSMITH_TRACING", "1")
-    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
-
-    assert "project 'default'" in checks.run().render()
-
-
 # --- Langfuse -------------------------------------------------------------
 #
-# Unlike LangSmith, this one is Scout's own (see scout/core/tracing.py), so the
-# report reads the settings the runtime reads and the two cannot disagree.
+# Tracing is Scout's own (see scout/core/tracing.py), so the report reads the
+# settings the runtime reads and the two cannot disagree.
 
 
 def test_langfuse_off_says_what_would_turn_it_on(configured) -> None:

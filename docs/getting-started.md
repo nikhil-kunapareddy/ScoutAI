@@ -158,7 +158,6 @@ scout doctor — /Users/you/ScoutAI
   ✓ referrals          /Users/you/ScoutAI/state/referrals.json (not created yet)
   ! digest             DIGEST_SLACK_USER unset — `scout digest` has nobody to DM
   ✓ langfuse           off (set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to trace turns)
-  ✓ langsmith          off (set LANGSMITH_TRACING=true to trace turns)
 
 Ready to start, with 1 thing worth knowing about.
 ```

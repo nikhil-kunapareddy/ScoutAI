@@ -7,19 +7,28 @@ per turn, tracing when you want the full picture, and an alert when a unit dies.
 - [Turn metrics](#turn-metrics)
 - [Reading them back](#reading-them-back)
 - [Tracing with Langfuse](#tracing-with-langfuse)
-- [Tracing with LangSmith](#tracing-with-langsmith)
 - [Alerts](#alerts)
 - [When the bot goes quiet](#when-the-bot-goes-quiet)
 
 ## The daily digest
 
 ```bash
-scout digest          # or: python -m scout.digest
+scout digest                      # the default agent's digest
+scout digest --agent edu          # the Edu Agent's
+scout digest --agent referral     # what is open across your referral list
 ```
 
-Runs every job agent, then DMs you one merged report. Which agents run is
-**derived, not listed**: any spec with `tailor_with_resume` counts, so a new job
-agent joins tomorrow's digest without touching `scout/digest.py`.
+**One agent, one DM, in that agent's own Slack window.** Each agent is a
+separate Slack app, so the digest runs as one process per agent and posts with
+that agent's own bot token — the BigTech report lands in the BigTech DM, the
+Referral Window's in its own. A single process can only hold one token, which
+is why running them together would stack every report into one conversation.
+
+Which agents *have* a digest is **derived, not listed**: any spec with
+`in_digest` counts, so a new job agent gets a morning report without touching
+`scout/digest.py`. It is a separate flag from `tailor_with_resume` because the
+two answer different questions — the Referral Window searches a scope rather
+than a résumé, and still has something to say every morning.
 
 Each agent runs on its own thread (`digest:<key>`), kept apart from the threads
 the Slack bot uses. Two things follow. The digest never eats into your chat
@@ -29,13 +38,47 @@ each agent can see what it reported on previous days and skip repeats. That
 thread memory is the only dedupe available here: agents return prose, not the
 structured `JobPosting` objects their tools built.
 
-One agent failing does not lose the others: its section says so, and the rest
-are still delivered.
+### What it looks like
+
+The header is written by `run_digest`; the rest is the agent, held to a layout
+by `DIGEST_REQUEST`:
+
+```
+*BigTech Agent — Sat 19 Sep 2026*
+
+1. *Senior ML Engineer, Recommendations* — Netflix
+    Ranking and retrieval, which is what your last two roles were.
+    2 days ago · https://explore.jobs.netflix.net/careers/job/…
+
+2. *Applied Scientist II* — Amazon
+    Referral: you know someone here.
+    4 days ago · https://amazon.jobs/en/jobs/…
+
+Searched all 22 boards. Bloomberg gives no posting dates; Cisco was unreachable.
+```
+
+The layout is asked for rather than rendered, because what an agent returns is
+prose — the structured `JobPosting` objects its tools built are gone by then,
+which is the same reason the thread is the only dedupe. The fields themselves
+were already identical across every source, from `render_postings`; pinning the
+request is what stops the *report* drifting between days and between backends.
+Two rules in it earn their place: repeat the tool's date word for word (Workday
+gives only "5 Days Ago", Bloomberg gives nothing), and leave the title and date
+to the code, or the message grows two headers.
+
+A failed run still DMs you: the message says what broke, because a silent
+morning is indistinguishable from a bot that died.
 
 Needs `DIGEST_SLACK_USER` and `SLACK_BOT_TOKEN`. It posts over the Web API and
-never opens a socket, so no `SLACK_APP_TOKEN`. On the box a systemd timer fires
-it at 08:00 local with `MAX_TOOL_HOPS` raised to 8, since one digest turn sweeps
-every source.
+never opens a socket, so no `SLACK_APP_TOKEN`. `DIGEST_MAX_ROLES` is per agent,
+since each run reads its own `.env.<agent>` — the Referral Window's is set
+higher, because a capped list would break the one claim it makes.
+
+On the box a timer per agent fires them at 08:00, 08:10 and 08:20
+`America/Los_Angeles`, with `MAX_TOOL_HOPS` raised to 8 since one digest turn
+sweeps every source. The timezone is the reader's, not the host's — the box
+runs on Eastern and systemd converts. Staggered rather than simultaneous: see
+[deployment](deployment.md#aws--what-this-repo-runs-on).
 
 ## Turn metrics
 
@@ -145,27 +188,9 @@ Traces carry prompts and completions, **résumé profile included**.
 `LANGFUSE_HIDE_CONTENT=true` masks them and keeps the rest — the call tree, the
 latencies, and the token counts.
 
-## Tracing with LangSmith
-
-LangSmith can run alongside Langfuse, or instead of it, and needs no code at
-all: LangGraph instruments itself when these are set. Set them and restart for
-the same picture of a turn, in the other tool:
-
-```
-LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=lsv2_pt_...
-LANGSMITH_PROJECT=scout
-```
-
-Both complement the `turn` line rather than replacing it: the log line is the
-cheap always-on record, a trace is what you open when a digest returns something
-odd and you want to see which tool returned what.
-
-Be aware it sends prompts and completions off the box, **résumé profile
-included**. `LANGSMITH_HIDE_INPUTS=true` and `LANGSMITH_HIDE_OUTPUTS=true` keep
-the call tree, latency, and token counts while leaving the content behind.
-Tracing is best-effort and batched in the background, so an unreachable
-LangSmith slows nothing and fails no turns.
+Tracing complements the `turn` line rather than replacing it: the log line is
+the cheap always-on record, a trace is what you open when a digest returns
+something odd and you want to see which tool returned what.
 
 ## Alerts
 

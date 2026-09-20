@@ -43,9 +43,6 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pypdf>=6.18.1",
     "docx2txt>=0.8",
-    # Tracing. Pulled in by langchain-core anyway; named here because the
-    # deployment turns it on with LANGSMITH_TRACING.
-    "langsmith>=0.12.4",
     # Agent observability: the per-turn call tree, wired up in core/tracing.py.
     # `langchain` is not imported anywhere in this package — langfuse's LangChain
     # integration imports it to tell v0 from v1, and refuses to load without

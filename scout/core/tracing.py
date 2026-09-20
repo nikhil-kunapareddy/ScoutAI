@@ -10,8 +10,8 @@ This module is the only place in the package that knows Langfuse exists.
 instrumented one or the one it already had, so a turn's code path is the same
 either way. Four rules hold that in place:
 
-- **Off unless both keys are set.** The key pair *is* the switch — nothing else
-  reads it, unlike ``LANGSMITH_TRACING``, which LangSmith reads itself. Half a
+- **Off unless both keys are set.** The key pair *is* the switch: this module
+  reads it, so there is no separate on/off flag to disagree with it. Half a
   pair is a typo rather than a choice, and ``scout doctor`` says so.
 - **Observability never breaks a turn.** The import, the client and the handler
   are built inside one ``try`` that logs and leaves tracing off for the life of
@@ -266,9 +266,8 @@ def _worth_exporting(span: ReadableSpan) -> bool:
 def _redact(*, data: object, **_kwargs: object) -> str:
     """Replace one traced input or output with a placeholder.
 
-    Matches Langfuse's ``MaskFunction``, and is the counterpart of LangSmith's
-    ``HIDE_INPUTS``/``HIDE_OUTPUTS``: the call tree, the latencies and the token
-    counts still arrive, the résumé profile in the system prompt does not.
+    Matches Langfuse's ``MaskFunction``: the call tree, the latencies and the
+    token counts still arrive, the résumé profile in the system prompt does not.
 
     Args:
         data: The input or output Langfuse is about to record. Annotated
