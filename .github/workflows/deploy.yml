@@ -49,24 +49,6 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Deploying $sha"
 
-      # Temporary. The first deploy was refused with "Not authorized to perform
-      # sts:AssumeRoleWithWebIdentity" while the role's trust policy read
-      # exactly what was expected, which means the claim GitHub presents for a
-      # workflow_run event is not the one it was pinned to. Prints the claims
-      # only — the token itself is never echoed — so the condition can be
-      # written from what is actually sent rather than from a guess.
-      - name: Show the OIDC claims this run presents
-        run: |
-          set -euo pipefail
-          token=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          payload=$(cut -d. -f2 <<<"$token")
-          pad=$(( (4 - ${#payload} % 4) % 4 ))
-          printf '%s%s' "$payload" "$(printf '=%.0s' $(seq 0 $pad | tail -n +2))" \
-            | tr '_-' '/+' | base64 -d \
-            | jq '{sub, aud, repository, ref, event_name, workflow_ref, job_workflow_ref}'
-
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::051370879922:role/ScoutGitHubDeploy
