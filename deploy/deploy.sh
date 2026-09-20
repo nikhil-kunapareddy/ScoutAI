@@ -91,6 +91,11 @@ EOF
 echo "==> Installing unit files"
 "${SSH[@]}" 'sudo cp /opt/scout/app/deploy/*.service /opt/scout/app/deploy/*.timer /etc/systemd/system/ && sudo systemctl daemon-reload'
 
+# Copying a timer is not enabling it, and an un-enabled timer fails silently —
+# there is no error, just a digest that never arrives. See timer-check.sh.
+echo "==> Timers"
+"${SSH[@]}" 'bash /opt/scout/app/deploy/timer-check.sh /opt/scout/app/deploy'
+
 echo "==> Restarting"
 "${SSH[@]}" 'bash -s' <<'REMOTE'
 # No -e: a failed restart should still print its log, which is the whole reason
