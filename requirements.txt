@@ -17,4 +17,4 @@ python-dotenv>=1.0.0
 pypdf>=6.18.1
 docx2txt>=0.8
 langfuse>=4.0.0
-langchain>=1.4.0
+langchain>=1.4.2
