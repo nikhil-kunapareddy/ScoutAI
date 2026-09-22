@@ -42,7 +42,7 @@ dependencies = [
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
     "pypdf>=6.18.1",
-    "docx2txt>=0.8",
+    "docx2txt>=0.9",
     # Agent observability: the per-turn call tree, wired up in core/tracing.py.
     # `langchain` is not imported anywhere in this package — langfuse's LangChain
     # integration imports it to tell v0 from v1, and refuses to load without
