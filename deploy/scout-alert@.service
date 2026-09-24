@@ -8,4 +8,5 @@ Type=oneshot
 User=ec2-user
 WorkingDirectory=/opt/scout/app
 EnvironmentFile=/opt/scout/scout.env
+EnvironmentFile=-/opt/scout/secrets.env
 ExecStart=/opt/scout/venv/bin/python -m scout.alert %i

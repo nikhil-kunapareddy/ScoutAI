@@ -41,8 +41,11 @@ make check                        # ruff, mypy, pytest --cov — what CI runs
 `--agent` has to reach the environment before the import that layers
 `.env.<agent>`. `tests/test_cli.py` guards that.
 
-Deployed on an EC2 `t4g.micro` under systemd; `./deploy/deploy.sh` ships the
-working tree and restarts. See the AWS section of docs/deployment.md.
+Deployed on an EC2 `t4g.micro` under systemd. A green `main` deploys itself
+(`deploy.yml` → SSM → `deploy/update.sh`); `./deploy/deploy.sh` ships the
+working tree from a laptop. Keys for the box go in Parameter Store under
+`/scout/shared/` or `/scout/<agent>/`, never only in the laptop's `.env`,
+which a merge does not carry. See the AWS section of docs/deployment.md.
 
 ## Layout
 
@@ -66,7 +69,7 @@ working tree and restarts. See the AWS section of docs/deployment.md.
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/core/tracing.py` | Langfuse — the per-turn call tree; the only module that imports it |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
-| `deploy/` | `deploy.sh` plus the systemd units the box runs |
+| `deploy/` | `deploy.sh` (laptop), `update.sh` (merge to main), `pull-secrets.sh` (Parameter Store), and the systemd units the box runs |
 | `scripts/sync_requirements.py` | Regenerates `requirements*.txt` from `pyproject.toml` |
 | `docs/` | Every document except the root three: the user-facing set plus `CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY` and `CHANGELOG`, indexed by `docs/README.md` |
 

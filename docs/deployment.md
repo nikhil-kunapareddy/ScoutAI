@@ -49,6 +49,8 @@ several times more. Your model bill will dwarf all of it.
 | File | Purpose |
 |---|---|
 | `deploy.sh` | rsync the working tree, install deps, refresh units, restart every enabled instance |
+| `update.sh` | the same for one commit, run on the box by the Deploy workflow when `main` goes green |
+| `pull-secrets.sh` | write the keys in Parameter Store into the env files the units read; both routes run it |
 | `scout@.service` | the bot, one instance per agent (`scout@bigtech`, `scout@edu`) |
 | `scout-digest@.service` | the daily digest, one instance per agent, posting as that agent |
 | `scout-digest-<key>.timer` | when each agent's digest runs — 08:00, 08:10, 08:20 `America/Los_Angeles` |
@@ -90,6 +92,65 @@ They win over the `.env` that was copied up, because `load_dotenv()` leaves
 existing environment variables alone. The per-instance file is optional (the
 leading `-` in the unit) and wins on a duplicate key.
 
+### Keys: Parameter Store
+
+API keys and tokens live in AWS Systems Manager Parameter Store, as
+`SecureString` parameters under `/scout`:
+
+```
+/scout/shared/ANTHROPIC_API_KEY    ──▶ /opt/scout/secrets.env        every unit
+/scout/edu/SLACK_BOT_TOKEN         ──▶ /opt/scout/secrets-edu.env    scout@edu, scout-digest@edu
+```
+
+Every deploy runs `deploy/pull-secrets.sh` before it restarts anything. The
+script reads the store with the instance role and writes those files whole, so
+a parameter deleted from the store disappears from the box too. The units read
+them after `scout.env` and `scout-<agent>.env`, so the store wins on a
+duplicate key. If the read fails, nothing is written and the deploy stops
+there.
+
+The store exists because neither deploy route can carry a key. Git must not,
+and `deploy.sh` only carries whatever the laptop's `.env` holds. A key added
+to that `.env` used to reach the box on the next laptop deploy and never on a
+merge to `main`.
+
+**Changing a key** takes two commands. Run the first in CloudShell, because
+the `scout-deploy` user's permissions boundary excludes `ssm:*`:
+
+```bash
+aws ssm put-parameter --region us-east-1 --overwrite --type SecureString \
+  --name /scout/shared/ANTHROPIC_API_KEY --value 'sk-ant-…'
+gh workflow run deploy.yml     # redeploys the tip of main: fetch, restart
+```
+
+**One-time setup:** the instance role needs read access to the store. Run
+this in CloudShell. The `aws/ssm` key the parameters are encrypted with needs
+no grant of its own.
+
+```bash
+aws iam put-role-policy --role-name ScoutInstanceRole \
+  --policy-name read-scout-parameters --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": "ssm:GetParametersByPath",
+      "Resource": [
+        "arn:aws:ssm:us-east-1:051370879922:parameter/scout",
+        "arn:aws:ssm:us-east-1:051370879922:parameter/scout/*"
+      ]
+    }]
+  }'
+```
+
+### Merging to main deploys
+
+When CI goes green on a commit to `main`, `.github/workflows/deploy.yml`
+assumes the `ScoutGitHubDeploy` role by OIDC and runs `deploy/update.sh` on the
+box through SSM Run Command. There is no SSH key in GitHub and no inbound port.
+`update.sh` fetches the keys, hard-resets the checkout to that commit,
+installs dependencies, and restarts every enabled bot. It rolls back if one
+does not come up. It never touches `.env`, `data/` or `state/`.
+
 ```bash
 sudo systemctl enable --now scout@bigtech
 sudo systemctl enable --now scout@edu
@@ -128,10 +189,10 @@ editing.
 - **Give each instance its own `CHECKPOINT_DB`.** Thread ids are the bare Slack
   user id, so two bots sharing one database interleave your conversations into a
   single history.
-- **No IAM role on the instance.** Nothing is pushed to CloudWatch — alerting
-  goes to Slack instead, which is where you already look. Attach an instance
-  profile if you want CloudWatch Logs; the metrics line is already shaped for
-  Logs Insights.
+- **Nothing goes to CloudWatch.** Alerting goes to Slack instead, which is
+  where you already look. Grant the instance role (`ScoutInstanceRole`)
+  CloudWatch Logs if you want it; the metrics line is already shaped for Logs
+  Insights.
 
 Fargate, Lightsail, or an EC2 instance elsewhere all run the same `Dockerfile`
 if you would rather not manage a box.

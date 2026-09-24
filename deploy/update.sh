@@ -12,7 +12,8 @@
 # What this does *not* touch is the point of using git rather than rsync: .env,
 # data/ and state/ are git-ignored, so they are untracked here and a hard reset
 # leaves them alone. No `git clean` for the same reason — it would take the
-# resume and the referral list with it.
+# resume and the referral list with it. Keys come from Parameter Store instead
+# (pull-secrets.sh), so a merge can deliver a changed one.
 #
 #   deploy/update.sh <sha>
 set -euo pipefail
@@ -59,6 +60,13 @@ PREV="$(app git -C "$APP" rev-parse HEAD)"
 echo "==> $PREV -> $SHA"
 
 app git -C "$APP" fetch --quiet origin main
+
+# Before the reset, and out of the commit being deployed: if the store cannot
+# be read, the deploy stops here with the checkout and the bots as they were.
+echo "==> Secrets from Parameter Store"
+app git -C "$APP" show "$SHA:deploy/pull-secrets.sh" > /tmp/scout-secrets.sh
+bash /tmp/scout-secrets.sh
+
 app git -C "$APP" reset --hard --quiet "$SHA"
 app "$VENV/bin/pip" install -q -r "$APP/requirements.txt"
 

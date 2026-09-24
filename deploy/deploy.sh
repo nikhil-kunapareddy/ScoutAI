@@ -4,7 +4,8 @@
 # Deliberately rsync and not `git pull`: .env and data/ are git-ignored but are
 # exactly what the host needs, so one copy covers code, resume, and secrets.
 # Host-local settings live in /opt/scout/scout.env and the per-agent
-# /opt/scout/scout-<agent>.env, neither of which is ever overwritten.
+# /opt/scout/scout-<agent>.env, neither of which is ever overwritten. Keys in
+# Parameter Store win over both, and over the .env this copies (pull-secrets.sh).
 #
 # Every enabled scout@ instance is restarted, so a second agent is picked up
 # once it is enabled — nothing here needs editing.
@@ -75,6 +76,11 @@ rsync -az --delete \
 
 echo "==> Installing dependencies if they changed"
 "${SSH[@]}" '/opt/scout/venv/bin/pip install -q -r /opt/scout/app/requirements.txt'
+
+# The same script update.sh runs, so a laptop deploy and a merge to main leave
+# the box holding the same keys. They win over the .env just copied up.
+echo "==> Secrets from Parameter Store"
+"${SSH[@]}" 'sudo bash /opt/scout/app/deploy/pull-secrets.sh'
 
 # Outside /opt/scout/app, so `rsync --delete` never removes it and the next
 # deploy's file list cannot disagree with it. `.git` is excluded from the sync,
