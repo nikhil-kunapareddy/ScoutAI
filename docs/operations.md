@@ -99,7 +99,7 @@ turn agent="BigTech Agent" thread=U0B8… backend=anthropic answered_by=anthropi
 | `usd` | Only when `USD_PER_MTOK_IN`/`OUT` are set |
 
 `key=value` pairs on purpose: greppable with `journalctl`, parseable by
-CloudWatch Logs Insights if the box ever gets an IAM role, and readable as-is.
+CloudWatch Logs Insights if the box's role is ever granted Logs, and readable as-is.
 
 Rates are configuration rather than a table baked into the code — they differ
 per backend, they change, and a stale hard-coded number is worse than none.
@@ -195,8 +195,9 @@ something odd and you want to see which tool returned what.
 ## Alerts
 
 `scout-alert@.service` DMs you when a unit fails, wired up as systemd's
-`OnFailure=`. Slack rather than CloudWatch on purpose: the box has no IAM role,
-and an alert that needs a console visit is an alert nobody reads.
+`OnFailure=`. Slack rather than CloudWatch on purpose: the box's role has
+no CloudWatch permissions, and an alert that needs a console visit is an
+alert nobody reads.
 
 Note what it does and does not catch. `Restart=always` makes a single crash
 silent and automatic, so an alert means the unit **exhausted its restart

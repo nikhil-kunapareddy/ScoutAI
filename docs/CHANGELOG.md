@@ -60,6 +60,14 @@ first release.
 
 ### Added
 
+- **Keys come from AWS Parameter Store, so a merge to `main` can deliver a
+  changed one.** `deploy/pull-secrets.sh` reads `/scout/shared/*` and
+  `/scout/<agent>/*` with the instance role and writes `/opt/scout/secrets.env`
+  and `secrets-<agent>.env`. The units read those files last, so the store wins
+  over the hand-kept files. Both deploy routes run the script before they
+  restart anything, and a failed read stops the deploy with nothing changed.
+  Before this, a key added to the laptop's `.env` reached the box only through
+  a laptop `deploy.sh`, because git (correctly) never carried it.
 - Fourteen more companies for the BigTech Agent, taking it to twenty-two: Microsoft,
   Apple, NVIDIA, Oracle, Salesforce, Adobe, Uber, Cisco, Bloomberg, ServiceNow,
   Anthropic, OpenAI, Snowflake and DoorDash. Every board was checked live for a

@@ -29,6 +29,9 @@ WorkingDirectory=/opt/scout/app
 # tokens come from the rsynced .env.<key> still runs.
 EnvironmentFile=/opt/scout/scout.env
 EnvironmentFile=-/opt/scout/scout-%i.env
+# Then the Parameter Store keys, in the same order as scout@.service.
+EnvironmentFile=-/opt/scout/secrets.env
+EnvironmentFile=-/opt/scout/secrets-%i.env
 Environment=AGENT=%i
 # A digest sweeps every source in one turn, so it needs more hops than a chat
 # reply. Set here rather than in scout.env so the bots keep their own tighter

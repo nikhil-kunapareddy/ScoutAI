@@ -25,6 +25,11 @@ WorkingDirectory=/opt/scout/app
 # with everything in scout.env still starts.
 EnvironmentFile=/opt/scout/scout.env
 EnvironmentFile=-/opt/scout/scout-%i.env
+# The keys from Parameter Store, written by deploy/pull-secrets.sh on every deploy.
+# Read last so the store wins over a stale copy in the hand-kept files above;
+# optional so a box with nothing in the store still starts.
+EnvironmentFile=-/opt/scout/secrets.env
+EnvironmentFile=-/opt/scout/secrets-%i.env
 Environment=AGENT=%i
 ExecStart=/opt/scout/venv/bin/python run.py
 # Socket Mode holds a websocket; SIGTERM closes it through the app's own
