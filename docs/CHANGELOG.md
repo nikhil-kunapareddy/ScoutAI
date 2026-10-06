@@ -9,6 +9,13 @@ first release.
 
 ### Changed
 
+- **The résumé is `data/resume.pdf`, and only that.** The Resume Parser used to
+  read whichever PDF, DOCX, TXT or MD file in `data/` was newest; now it reads
+  the one file under that name and ignores the rest, so which résumé a profile
+  came from is never a guess. `scout doctor` checks the same path, and
+  `docx2txt` is no longer a dependency. Rename an existing résumé to
+  `resume.pdf` — on the box too, since a merge never touches its `data/`.
+
 - **The digest is one report per agent, in that agent's own Slack DM.** It used
   to run every job agent in a single process and post one merged message — and
   since a process holds one bot token, all of it arrived in whichever app was

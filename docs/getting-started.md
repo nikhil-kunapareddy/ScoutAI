@@ -23,7 +23,7 @@ three commands.
 | **Python 3.10 or newer** | `python3 --version` |
 | **A Slack workspace you can install apps into** | Your own free workspace is the easiest — create one at [slack.com/create](https://slack.com/create) |
 | **A model** | An [Anthropic API key](https://console.anthropic.com/settings/keys) (recommended), or [Ollama](https://ollama.com) running locally for a free, private setup |
-| **Your résumé** | PDF, DOCX, TXT, or MD |
+| **Your résumé** | A PDF, which you will save as `data/resume.pdf` |
 
 You do not need a server, a domain, or an open port. The bot dials out to Slack
 over a websocket, so it runs fine on a laptop while you try it.
@@ -131,11 +131,11 @@ lists them all.
 ## 4. Add your résumé
 
 ```bash
-cp ~/Documents/my_resume.pdf data/
+cp ~/Documents/my_resume.pdf data/resume.pdf
 ```
 
-The Resume Parser reads the most recently modified file in `data/` (PDF, DOCX,
-TXT, or MD), distils it once into a profile — target titles, skills, search
+The Resume Parser reads `data/resume.pdf` — a PDF, under exactly that name;
+anything else in `data/` is ignored — distils it once into a profile — target titles, skills, search
 keywords — and every search afterwards is run against that profile. `data/` is
 git-ignored.
 
@@ -265,7 +265,7 @@ setup uses a timer at 08:00 local. See [docs/deployment.md](deployment.md).
 | The bot never replies, and the log shows no DM | The Messages tab is off, or `message.im` is not subscribed. Reinstall the app after fixing either. |
 | The message box in Slack is greyed out | **App Home** → allow sending messages from the messages tab. |
 | Replies mention no roles at all | Ask for something specific ("amazon jobs in the last week"). Every source filters to AI/ML roles by title; a general search may legitimately find nothing. |
-| *"No resume found in data/"* | Nothing in `data/` with a `.pdf`, `.docx`, `.txt`, or `.md` suffix. |
+| *"No resume found at data/resume.pdf"* | The file is missing or named something else. Save the résumé as `data/resume.pdf`. |
 | A new résumé has no effect | The profile is cached per user. Send `--reset`. |
 | *"Sorry, I got stuck calling my tools"* | The turn used its tool budget. Narrow the question, or raise `MAX_TOOL_HOPS`. |
 | Claude errors, and the reply says the local model answered | The fallback rescued the turn. Check the key, or `--ollama` deliberately. |

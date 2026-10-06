@@ -102,7 +102,16 @@ def test_no_resume_warns_rather_than_failing(configured, monkeypatch) -> None:
 
     assert report.ok
     assert levels(report)["resume"] == checks.WARN
+    # The remedy names the one file that would count.
+    assert "resume.pdf" in report.render()
     assert "untailored" in report.render()
+
+
+def test_a_resume_under_another_name_does_not_count(configured) -> None:
+    """The parser reads resume.pdf and nothing else, so doctor has to agree."""
+    (configured / "resume.pdf").rename(configured / "sai_resume0807.pdf")
+
+    assert levels(checks.run())["resume"] == checks.WARN
 
 
 def test_no_anthropic_key_warns_about_the_local_model(configured, monkeypatch) -> None:

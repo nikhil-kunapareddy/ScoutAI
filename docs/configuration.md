@@ -104,7 +104,7 @@ the cached profile outlives the process too.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RESUME_DIR` | `data` | Where the Resume Parser looks. Relative to the project root, so a clone needs nothing here; set it if you installed the package instead of cloning. |
+| `RESUME_DIR` | `data` | The folder holding `resume.pdf`, the one file the Resume Parser reads. Relative to the project root, so a clone needs nothing here; set it if you installed the package instead of cloning. |
 | `REFERRALS_FILE` | `state/referrals.json` | The referral list. Unlike `CHECKPOINT_DB` this has a real default: history is disposable, a list you typed by hand is not. |
 
 `state/` is excluded from `deploy.sh`'s rsync, so a redeploy cannot overwrite

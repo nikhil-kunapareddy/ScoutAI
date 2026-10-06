@@ -160,8 +160,8 @@ Three seams hold the layers apart — keep them intact:
   because the Dockerfile and `deploy.sh` install from the flat list.
 - Ruff, `line-length = 100`, py310 target. `ANN` is on for `scout/`, so every
   function there is annotated, and `mypy` runs with `disallow_untyped_defs`.
-  The two scoped `mypy` overrides (docx2txt, `scout.core.models`) are explained
-  in `pyproject.toml` — prefer fixing a type over widening them.
+  The one scoped `mypy` override (`scout.core.models`) is explained in
+  `pyproject.toml` — prefer fixing a type over widening it.
 
 ## Invariants worth not breaking
 

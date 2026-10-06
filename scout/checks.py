@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from .agents import AGENTS
 from .core import models, referrals, settings, tracing
 from .core.paths import PROJECT_ROOT, under_root
-from .tools.resume import RESUME_EXTENSIONS, resume_dir, resumes_in
+from .tools.resume import resume_path
 
 #: Levels. Only FAIL sets the exit status; WARN describes a reduced setup.
 OK = "ok"
@@ -172,19 +172,10 @@ def _fallback() -> Check:
 
 def _resume() -> Check:
     """Whether the Resume Parser has something to read."""
-    directory = resume_dir()
-    resumes = resumes_in(directory)
-    if not resumes:
-        extensions = ", ".join(sorted(RESUME_EXTENSIONS))
-        missing = "no folder at" if not directory.is_dir() else f"nothing ({extensions}) in"
-        return Check(
-            "resume",
-            f"{missing} {directory} — searches run untailored",
-            WARN,
-        )
-    newest = max(resumes, key=lambda path: path.stat().st_mtime)
-    extra = f" (+{len(resumes) - 1} more, newest wins)" if len(resumes) > 1 else ""
-    return Check("resume", f"{directory.name}/{newest.name}{extra}")
+    path = resume_path()
+    if not path.is_file():
+        return Check("resume", f"no {path} — searches run untailored", WARN)
+    return Check("resume", f"{path.parent.name}/{path.name}")
 
 
 def _state() -> Check:

@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import docx2txt
 from pypdf import PdfReader
 
 from ..core import settings
 from ..core.paths import under_root
 from .registry import ToolRegistry
 
-RESUME_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+#: The one file the Resume Parser reads. A fixed name rather than "whichever
+#: file is newest", so which resume a profile came from is never a guess.
+RESUME_FILE = "resume.pdf"
 
 
 def resume_dir() -> Path:
-    """Where to look for resumes, per ``RESUME_DIR``.
+    """Where to look for the resume, per ``RESUME_DIR``.
 
     Resolved on each call rather than at import, so a test — or an operator
     moving the folder — does not have to reload the module.
@@ -23,51 +24,29 @@ def resume_dir() -> Path:
     return under_root(settings.RESUME_DIR)
 
 
-def resumes_in(directory: Path) -> list[Path]:
-    """Every file in ``directory`` that looks like a resume."""
-    if not directory.is_dir():
-        return []
-    return [
-        path
-        for path in directory.iterdir()
-        if path.is_file() and path.suffix.lower() in RESUME_EXTENSIONS
-    ]
+def resume_path() -> Path:
+    """The resume itself: ``resume.pdf`` in ``RESUME_DIR``."""
+    return resume_dir() / RESUME_FILE
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
     def get_resume_profile() -> str:
-        """Read the user's resume from the data/ folder and return its full text.
+        """Read the user's resume (resume.pdf in the data/ folder) and return its full text.
 
         Use this to understand the user's skills, experience, and field before
-        searching for jobs or answering questions about their background. Picks
-        the most recently modified resume file if several are present."""
-        directory = resume_dir()
-        if not directory.is_dir():
-            return (f"No {directory.name}/ folder found. Add your resume there "
-                    "(PDF, DOCX, TXT, or MD).")
+        searching for jobs or answering questions about their background."""
+        path = resume_path()
+        where = f"{path.parent.name}/{RESUME_FILE}"
+        if not path.is_file():
+            return f"No resume found at {where}. Save the resume there, as a PDF under that name."
 
-        resumes = resumes_in(directory)
-        if not resumes:
-            return (f"No resume found in {directory.name}/. Add a resume file "
-                    "(PDF, DOCX, TXT, or MD) to that folder.")
-
-        newest = max(resumes, key=lambda path: path.stat().st_mtime)
         try:
-            text = _extract_text(newest).strip()
+            text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
         except Exception as e:
-            return f"Could not read resume '{newest.name}': {e}"
+            return f"Could not read resume '{where}': {e}"
 
+        text = text.strip()
         if not text:
-            return f"Resume '{newest.name}' appears to be empty or unreadable (scanned image?)."
-        return f"Resume file: {newest.name}\n\n{text}"
-
-
-def _extract_text(path: Path) -> str:
-    """Pull plain text out of a resume file, by extension."""
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        return "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
-    if suffix == ".docx":
-        return docx2txt.process(str(path)) or ""
-    return path.read_text(encoding="utf-8", errors="ignore")  # .txt / .md
+            return f"Resume '{where}' appears to be empty or unreadable (scanned image?)."
+        return f"Resume file: {where}\n\n{text}"
