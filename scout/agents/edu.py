@@ -31,4 +31,4 @@ SPEC = AgentSpec(
     tool_modules=[clock, location, northeastern, boston_university],
     tailor_with_resume=True,  # supplies the candidate profile the prompt expects
     in_digest=True,           # sweeps every source into its own morning DM
-)  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)
+)

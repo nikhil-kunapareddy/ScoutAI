@@ -1,7 +1,7 @@
 """What an agent is, and the graph every one of them compiles to.
 
-An ``AgentSpec`` describes one agent — name, system prompt, tool set, default
-backend — and ``build_agent_graph`` turns it into the graph they all share::
+An ``AgentSpec`` describes one agent — name, system prompt, tool set — and
+``build_agent_graph`` turns it into the graph they all share::
 
     START ──▶ model ──tool calls?──▶ tools ──┐
                  │                           │
@@ -44,7 +44,6 @@ class AgentSpec:
     name: str                       # display name (e.g. "BigTech Agent")
     system_prompt: str
     tool_modules: list[ModuleType] = field(default_factory=list)  # each has register(reg)
-    default_backend: str = settings.DEFAULT_BACKEND
     # Run behind the resume-parser stage, which appends a profile distilled from
     # the user's resume to this agent's instructions. See resume_tailored.py.
     tailor_with_resume: bool = False
@@ -57,7 +56,7 @@ class AgentSpec:
 
 
 class AgentState(MessagesState):
-    """Graph state: the conversation plus what the run needs to report itself.
+    """Graph state: the conversation, plus the resume brief when there is one.
 
     ``MessagesState`` supplies ``messages`` with the ``add_messages`` reducer, so
     nodes return the messages they add rather than the whole list.
@@ -65,8 +64,6 @@ class AgentState(MessagesState):
 
     #: Candidate brief from the resume parser; "" for agents that don't use one.
     profile: str
-    #: Backend that produced the last reply — the fallback, if the chosen one failed.
-    answered_by: str
 
 
 class AgentNode(Protocol):
@@ -100,22 +97,6 @@ class ConversationalAgent(ABC):
         """Forget everything remembered about this user."""
 
     @abstractmethod
-    def set_backend(self, user_id: str, name: str) -> bool:
-        """Switch this user's backend; False if the name is unknown."""
-
-    @abstractmethod
-    def backend_name(self, user_id: str) -> str:
-        """Name of the backend this user has chosen."""
-
-    @abstractmethod
-    def backend_label(self, user_id: str) -> str:
-        """Human-readable label of the backend this user has chosen."""
-
-    @abstractmethod
-    def last_backend(self, user_id: str) -> str:
-        """Backend that actually answered this user's last turn."""
-
-    @abstractmethod
     def tool_names(self) -> list[str]:
         """Tools this agent can call, for start-up diagnostics."""
 
@@ -142,30 +123,19 @@ def build_agent_graph(spec: AgentSpec, tools: list[BaseTool]) -> StateGraph:
 
 
 def _model_node(spec: AgentSpec, tools: list[BaseTool]) -> AgentNode:
-    """The node that calls the model, retrying once on the fallback backend."""
+    """The node that calls the model.
+
+    A call that fails raises out of the turn, after ``ChatAnthropic``'s own
+    retries: a node that raises commits nothing, so the thread is left as it
+    was before the failed call.
+    """
 
     def call_model(state: AgentState, config: RunnableConfig) -> dict:
-        chosen = config["configurable"].get("backend") or spec.default_backend
         messages = [
             SystemMessage(_instructions(spec, state.get("profile", ""))),
             *_within_window(state["messages"]),
         ]
-
-        try:
-            reply = models.with_tools(chosen, tools).invoke(messages, config)
-            answered = chosen
-        except Exception:
-            fallback = _fallback_for(chosen)
-            if fallback is None:
-                raise
-            # Retried here rather than around the whole turn so tool results
-            # already fetched are kept, and nothing from the failed call is
-            # recorded: a node that raises commits no messages.
-            log.exception("Backend %s failed; retrying on %s", chosen, fallback)
-            reply = models.with_tools(fallback, tools).invoke(messages, config)
-            answered = fallback
-
-        return {"messages": [reply], "answered_by": answered}
+        return {"messages": [models.with_tools(tools).invoke(messages, config)]}
 
     return call_model
 
@@ -195,19 +165,6 @@ def _within_window(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
         include_system=False,
         allow_partial=False,
     )
-
-
-def _fallback_for(chosen: str) -> str | None:
-    """The backend to retry a failed model call on, or None if there isn't one.
-
-    An empty ``FALLBACK_BACKEND`` disables the retry, which is what the
-    container image wants: there is no Ollama in it, so retrying would only make
-    every Claude failure fail twice.
-    """
-    name = settings.FALLBACK_BACKEND
-    if not name or name == chosen or not models.exists(name):
-        return None
-    return name
 
 
 def _tool_error(exc: Exception) -> str:

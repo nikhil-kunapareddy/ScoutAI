@@ -72,7 +72,6 @@ class ResumeTailoredAgent(GraphRunner):
             name=f"{job_spec.name} (resume-tailored)",
             graph=builder.compile(checkpointer=checkpointer),
             checkpointer=checkpointer,
-            default_backend=job_spec.default_backend,
             # The parser's only tool is the resume reader; the job tools are the
             # ones worth logging at start-up.
             tools=job_tools,
@@ -86,9 +85,6 @@ class ResumeTailoredAgent(GraphRunner):
             {
                 "configurable": {
                     "thread_id": _PARSER_THREAD.format(user_id=user_id),
-                    # Both stages move together, so a mid-conversation switch
-                    # can't leave the pipeline half on one model.
-                    "backend": config["configurable"].get("backend"),
                     # Start a fresh checkpoint namespace: this is its own graph,
                     # not a subgraph of the one calling it.
                     "checkpoint_ns": "",

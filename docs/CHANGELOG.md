@@ -54,6 +54,20 @@ first release.
 
 ### Removed
 
+- **Every model backend but Claude.** Ollama and the Meta Llama API are gone,
+  and with them `langchain-ollama` and `langchain-openai`, the `--claude`,
+  `--ollama`, `--api` and `--backend` commands (`--status` names the model
+  now), `AgentSpec.default_backend`, and the `OLLAMA_*`, `LLAMA_*` and
+  `FALLBACK_BACKEND` settings. There is no fallback model: `ChatAnthropic`
+  retries transient errors itself, and a call that still fails ends the turn
+  with the error in the reply. `ANTHROPIC_API_KEY` is therefore required, and
+  `scout doctor` reports a missing one as a failure rather than a warning.
+  The metrics line loses `backend=` and `answered_by=`, and traces lose the
+  `scout_backend` metadata field. Trace names, tags, sessions and the reply as
+  output are unchanged. Old checkpoints load as they are; the stale
+  `answered_by` key in them is ignored. `docs/technical-report.tex` still
+  describes the three-backend design.
+
 - **LangSmith.** `langsmith` is no longer a declared dependency, `scout doctor`
   no longer has a `langsmith` line, and the `LANGSMITH_` variables are gone from
   `.env.example` and the docs. Langfuse — which Scout wires up itself in

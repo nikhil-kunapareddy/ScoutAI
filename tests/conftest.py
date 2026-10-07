@@ -5,9 +5,9 @@ calls in the job tools are stubbed per-test. That keeps it runnable in CI with n
 credentials — which is also why ``scout.core.settings`` must not raise on import
 when ``.env`` is absent.
 
-The scripted models are installed into ``scout.core.models`` as if they were real
-backends, so the graph reaches them through ``build``/``with_tools``/``label``
-exactly as it reaches Claude or Ollama.
+The scripted model is installed into ``scout.core.models`` in place of Claude, so
+the graph reaches it through ``build``/``with_tools`` exactly as it reaches the
+real one — request options included.
 """
 
 from __future__ import annotations
@@ -58,7 +58,6 @@ class ScriptedModel(BaseChatModel):
     graph actually sent: the instructions, the trimming, the tool results.
     """
 
-    backend: str = "scripted"
     replies: list[AIMessage] = []
     fails: bool = False
     #: Start failing once this many calls have been made (None = never).
@@ -84,7 +83,7 @@ class ScriptedModel(BaseChatModel):
     ) -> ChatResult:
         self.seen.append(list(messages))
         if self.fails or (self.fail_after is not None and len(self.seen) > self.fail_after):
-            raise RuntimeError("backend exploded")
+            raise RuntimeError("model exploded")
         reply = (
             self.replies.pop(0) if self.replies else AIMessage("no more scripted replies")
         )
@@ -105,26 +104,12 @@ def texts(messages: list[BaseMessage]) -> list[str]:
 
 
 @pytest.fixture
-def chat_models(monkeypatch) -> dict[str, ScriptedModel]:
-    """Install scripted models as the only backends, with a fallback configured."""
-    registry = {
-        "primary": ScriptedModel(backend="primary"),
-        "fallback": ScriptedModel(backend="fallback"),
-    }
-    monkeypatch.setattr(
-        models_module,
-        "_BUILDERS",
-        {name: (lambda model=model: model) for name, model in registry.items()},
-    )
-    monkeypatch.setattr(
-        models_module,
-        "_LABELS",
-        {name: (lambda n=name: f"Scripted ({n})") for name in registry},
-    )
-    monkeypatch.setattr(models_module, "_REQUEST_OPTIONS", {})
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "fallback")
+def chat_model(monkeypatch) -> ScriptedModel:
+    """Install a scripted model in place of Claude."""
+    model = ScriptedModel()
+    monkeypatch.setattr(models_module, "_claude", lambda: model)
     models_module.reset_cache()
-    yield registry
+    yield model
     models_module.reset_cache()
 
 
@@ -159,7 +144,6 @@ def spec(echo_tool_module) -> AgentSpec:
         name="Test Agent",
         system_prompt="You are a test agent.",
         tool_modules=[echo_tool_module],
-        default_backend="primary",
     )
 
 

@@ -28,10 +28,6 @@ class FakeAgent(ConversationalAgent):
         return self.reply
 
     def reset(self, user_id: str) -> None: ...
-    def set_backend(self, user_id: str, name: str) -> bool: return True
-    def backend_name(self, user_id: str) -> str: return "anthropic"
-    def backend_label(self, user_id: str) -> str: return "Claude"
-    def last_backend(self, user_id: str) -> str: return "anthropic"
     def tool_names(self) -> list[str]: return []
 
 
@@ -178,8 +174,7 @@ def test_the_prompt_asks_for_what_could_not_be_checked(three_agents) -> None:
 
 def test_the_prompt_pins_the_layout(three_agents) -> None:
     """The report is prose by the time it exists, so the only place the shape
-    can be fixed is the request. Without this it drifts between days, and
-    between backends."""
+    can be fixed is the request. Without this it drifts between days."""
     digest.run_digest(_spec("alpha", digested=True))
     asked = three_agents["alpha"].prompts[0][1]
 

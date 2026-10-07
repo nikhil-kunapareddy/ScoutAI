@@ -26,9 +26,8 @@ pools*. Two things it expects:
 - **Secrets come from the platform**, not the image — `.dockerignore` excludes
   `.env`. Pass them with `--env-file` locally, and with Secrets Manager or SSM
   (AWS) or Secret Manager (GCP) in production.
-- **`FALLBACK_BACKEND` is empty in the image.** There is no Ollama in the
-  container, so an empty value disables the retry instead of making every
-  Claude failure fail twice.
+- **`ANTHROPIC_API_KEY` is required.** Claude is the only model, so a container
+  without the key starts but answers every message with an error.
 
 The résumé in `data/` is baked in by the `Dockerfile`, which is why the image
 belongs in a private registry. Mount `data/` as a volume and drop that `COPY`
@@ -73,7 +72,6 @@ Two files the deploy never overwrites, read in order by `scout@.service`:
 ```bash
 # /opt/scout/scout.env — shared by every agent
 CHECKPOINT_DB=/opt/scout/state/scout.sqlite
-FALLBACK_BACKEND=
 DIGEST_SLACK_USER=U012ABCDEF
 ```
 
@@ -217,7 +215,7 @@ for exactly this) if it is available in your project, or stay on GCE.
 ## On your Mac
 
 A `launchd` LaunchAgent with `RunAtLoad` and `KeepAlive` restarts the bot on
-crash and starts it at login. Free, and it keeps the Ollama fallback — but the
+crash and starts it at login. Free — but the
 bot is unreachable whenever the Mac sleeps, so it suits a desktop better than a
 laptop.
 

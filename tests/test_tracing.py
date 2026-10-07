@@ -162,7 +162,7 @@ def test_an_untraced_turn_runs_on_the_config_it_came_with() -> None:
 def test_the_turn_is_named_and_attributed(
     scripted_handler, attributes, root_span, thread: str, trace_name: str, source: str
 ) -> None:
-    config = {"configurable": {"thread_id": thread, "backend": "anthropic"}}
+    config = {"configurable": {"thread_id": thread}}
 
     with tracing.traced(
         config, agent="BigTech Agent", thread=thread, prompt="any AI roles?"
@@ -174,7 +174,6 @@ def test_the_turn_is_named_and_attributed(
         "session_id": thread,
         "user_id": thread,
         "tags": ["BigTech Agent", source],
-        "metadata": {"scout_backend": "anthropic"},
     }]
 
 
@@ -190,7 +189,7 @@ def test_a_trace_name_carries_nothing_per_run(attributes) -> None:
 
 def test_the_rest_of_the_config_is_carried_through(scripted_handler) -> None:
     config = {
-        "configurable": {"thread_id": "U1", "backend": "anthropic"},
+        "configurable": {"thread_id": "U1"},
         "recursion_limit": 9,
         "metadata": {"already": "here"},
     }
@@ -229,7 +228,7 @@ def test_the_trace_shows_the_question_and_the_answer(
 
 
 def test_a_traced_turn_answers_and_traces_every_step(
-    spec, chat_models, scripted_handler
+    spec, chat_model, scripted_handler
 ) -> None:
     """The whole point, end to end: a real turn with the handler in place.
 
@@ -237,7 +236,7 @@ def test_a_traced_turn_answers_and_traces_every_step(
     that aggregated the loop into one step would hide what the agent decided
     after the tool returned, which is the thing worth looking at.
     """
-    chat_models["primary"].replies = [calls_tool("echo", {"text": "hi"}), AIMessage("done")]
+    chat_model.replies = [calls_tool("echo", {"text": "hi"}), AIMessage("done")]
 
     assert Agent(spec).respond("U1", "use the tool") == "done"
 
@@ -289,10 +288,10 @@ def test_a_handler_that_cannot_be_built_leaves_turns_untraced(
 
 
 def test_a_turn_still_answers_when_tracing_will_not_start(
-    spec, chat_models, keys, monkeypatch
+    spec, chat_model, keys, monkeypatch
 ) -> None:
     monkeypatch.setattr(tracing, "_build_handler", lambda: 1 / 0)
-    chat_models["primary"].replies = [AIMessage("answered anyway")]
+    chat_model.replies = [AIMessage("answered anyway")]
 
     assert Agent(spec).respond("U1", "hi") == "answered anyway"
 

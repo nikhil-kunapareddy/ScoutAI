@@ -79,8 +79,7 @@ def run() -> Report:
             _agent(),
             _env_files(),
             _slack(),
-            _backends(),
-            _fallback(),
+            _model(),
             _resume(),
             _state(),
             _referrals(),
@@ -130,44 +129,11 @@ def _slack() -> Check:
     return Check("slack", "bot and app tokens present")
 
 
-def _backends() -> Check:
-    """Which model backends a user could switch to right now."""
-    usable = []
-    if settings.ANTHROPIC_API_KEY:
-        usable.append(f"anthropic ({settings.ANTHROPIC_MODEL})")
-    if settings.LLAMA_API_KEY:
-        usable.append(f"llama ({settings.LLAMA_MODEL})")
-    # Ollama needs no key; whether it is running is a network question, and this
-    # report deliberately asks none.
-    usable.append(f"ollama ({settings.OLLAMA_MODEL} at {settings.OLLAMA_HOST})")
-
-    detail = f"default={settings.DEFAULT_BACKEND}; available: {', '.join(usable)}"
+def _model() -> Check:
+    """Whether Claude, the one model every agent runs on, has a key."""
     if not settings.ANTHROPIC_API_KEY:
-        return Check(
-            "models",
-            f"{detail} — no ANTHROPIC_API_KEY, so every turn runs on the local model",
-            WARN,
-        )
-    return Check("models", detail)
-
-
-def _fallback() -> Check:
-    name = settings.FALLBACK_BACKEND
-    if not name:
-        return Check("fallback", "disabled — a failed turn fails once, cleanly")
-    if not models.exists(name):
-        return Check(
-            "fallback",
-            f"FALLBACK_BACKEND={name!r} is not a backend "
-            f"({', '.join(models.names())}); the retry will be skipped",
-            WARN,
-        )
-    if name == settings.DEFAULT_BACKEND:
-        # Retrying the backend that just failed on the same call buys nothing,
-        # so the runtime skips it. Worth saying, or the line reads as cover
-        # that isn't there.
-        return Check("fallback", f"{name} is also the default, so the retry is a no-op")
-    return Check("fallback", f"{name}, for one retry inside a failed turn")
+        return Check("model", "no ANTHROPIC_API_KEY — every turn fails until it is set", FAIL)
+    return Check("model", models.label())
 
 
 def _resume() -> Check:

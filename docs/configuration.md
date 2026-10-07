@@ -48,36 +48,19 @@ every DM.
 One process per agent. The digest runs them all in-process and needs no second
 app.
 
-## Models
+## Model
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Enables the Claude backend, and makes it the default. |
+| `ANTHROPIC_API_KEY` | — | **Required.** Claude is the only model every agent runs on; without a key every turn fails, and `scout doctor` says so. |
 | `ANTHROPIC_MODEL` | `claude-opus-5` | Any Claude model id. |
 | `ANTHROPIC_MAX_TOKENS` | `16000` | Per-reply ceiling. |
 | `ANTHROPIC_EFFORT` | `medium` | Thinking depth: `low`, `medium`, `high`, `xhigh`, `max`. Trades latency for depth; `medium` keeps a multi-hop tool loop snappy in Slack. |
-| `OLLAMA_HOST` | `http://localhost:11434` | Where the local model server listens. |
-| `OLLAMA_MODEL` | `llama3.2:3b` | Pull it first: `ollama pull llama3.2:3b`. |
-| `LLAMA_API_KEY` | — | Enables the Meta Llama API backend (`--api`). |
-| `LLAMA_MODEL` | `Llama-4-Maverick-17B-128E-Instruct-FP8` | |
-| `LLAMA_BASE_URL` | `https://api.llama.com/compat/v1` | Meta's OpenAI-compatible *base* URL, not the `/chat/completions` path. |
-| `MODEL_REQUEST_TIMEOUT_SECONDS` | `300` | Generous, because generation on a local model can take minutes. |
+| `MODEL_REQUEST_TIMEOUT_SECONDS` | `300` | Generous, because a long reply at a high effort can take minutes. |
 
-Users switch backends per conversation with `--claude`, `--ollama`, and
-`--api`; the choice lasts until they change it or the process restarts.
-
-## Backend selection and fallback
-
-| Variable | Default | Notes |
-|---|---|---|
-| `FALLBACK_BACKEND` | `ollama` | Where a failed model call is retried, once, inside the same turn. Empty disables the retry. |
-
-The default backend is not configured directly: it is Claude when
-`ANTHROPIC_API_KEY` is set, and Ollama otherwise. With no key there is nothing
-to fall back *from*, so the retry becomes a no-op.
-
-**Set `FALLBACK_BACKEND=` (empty) in a container.** There is no Ollama in the
-image, so leaving it on makes every Claude failure fail twice.
+There is no fallback model. `ChatAnthropic` retries transient API errors on its
+own; a call that still fails ends the turn with the error in the reply, and the
+user's next message starts clean.
 
 ## Conversation
 
@@ -135,7 +118,7 @@ hard-coded number is worse than none. See [operations](operations.md).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LOG_LEVEL` | `INFO` | `DEBUG` also un-mutes slack-bolt, urllib3, and the provider SDKs. |
+| `LOG_LEVEL` | `INFO` | `DEBUG` also un-mutes slack-bolt, urllib3, and the Anthropic SDK. |
 | `LOG_MAX_BYTES` | `5242880` | `logs/bot.log` rotates at 5 MB. |
 | `LOG_BACKUP_COUNT` | `3` | Rotated files kept. |
 
@@ -166,7 +149,7 @@ system prompt** — `LANGFUSE_HIDE_CONTENT` is the answer to that. See
 
 ## What is not configured here
 
-An agent's system prompt, its tool set, and its default backend live on its
+An agent's system prompt and its tool set live on its
 `AgentSpec` in `scout/agents/` — they are code, not environment. Adding a
 setting means adding it to `settings.py` and to `.env.example`; scattered
 `os.environ` reads are what that file exists to prevent.

@@ -27,9 +27,5 @@ RUN useradd --create-home --uid 1000 scout \
     && chown -R scout:scout /app
 USER scout
 
-# No Ollama in the container, so there is nothing to fall back to: an empty
-# value disables the retry instead of making every failure fail twice.
-ENV FALLBACK_BACKEND=""
-
 # Exec form, so the process is PID 1 and receives SIGTERM directly on stop.
 CMD ["python", "run.py"]

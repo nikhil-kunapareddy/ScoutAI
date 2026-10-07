@@ -110,7 +110,7 @@ def _run(_args: argparse.Namespace) -> int:
 
     spec = get_spec(settings.ACTIVE_AGENT)
     agent = build_agent(spec)
-    log.info("Agent %r ready (default backend=%s)", spec.key, spec.default_backend)
+    log.info("Agent %r ready", spec.key)
     SlackBot(agent).start()
     return 0
 
@@ -139,9 +139,8 @@ def _agents(_args: argparse.Namespace) -> int:
     for key, spec in sorted(AGENTS.items()):
         marks = " (resume-tailored)" if spec.tailor_with_resume else ""
         print(f"{key:<10} {spec.name}{marks}")
-        print(f"{'':<10} backend: {spec.default_backend}")
         names = [tool.name for tool in agent_tools(spec)]
-        print(f"{'':<10} tools:   {', '.join(names) or 'none'}")
+        print(f"{'':<10} tools: {', '.join(names) or 'none'}")
     return 0
 
 

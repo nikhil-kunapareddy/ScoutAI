@@ -131,8 +131,6 @@ def test_stats_reads_the_window_it_was_asked_for(monkeypatch, capsys) -> None:
     turn = TurnMetrics(
         agent="BigTech Agent",
         thread="U1",
-        backend="anthropic",
-        answered_by="anthropic",
         outcome="ok",
         seconds=1.0,
         model_calls=1,

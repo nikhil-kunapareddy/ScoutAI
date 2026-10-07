@@ -52,9 +52,9 @@ DIGEST_THREAD = "digest:{key}"
 #: back from an agent is prose — the structured ``JobPosting`` objects its tools
 #: built are gone by the time the reply exists, which is the same reason the
 #: thread is the only dedupe. Asking for the shape is the cheap half of that
-#: trade: a report that reads the same tomorrow, and the same on Ollama as on
-#: Claude. What it cannot enforce, ``render_postings`` already did — the fields
-#: the model is reformatting were identical across every source to begin with.
+#: trade: a report that reads the same tomorrow as it did today. What it cannot
+#: enforce, ``render_postings`` already did — the fields the model is
+#: reformatting were identical across every source to begin with.
 DIGEST_REQUEST = (
     "Daily job digest. Search everything you cover and report what is open, "
     "best first — at most {max_roles} roles. Prefer roles posted in the last "

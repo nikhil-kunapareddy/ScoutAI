@@ -22,7 +22,7 @@ three commands.
 |---|---|
 | **Python 3.10 or newer** | `python3 --version` |
 | **A Slack workspace you can install apps into** | Your own free workspace is the easiest — create one at [slack.com/create](https://slack.com/create) |
-| **A model** | An [Anthropic API key](https://console.anthropic.com/settings/keys) (recommended), or [Ollama](https://ollama.com) running locally for a free, private setup |
+| **An Anthropic API key** | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) — Claude is the only model Scout runs on |
 | **Your résumé** | A PDF, which you will save as `data/resume.pdf` |
 
 You do not need a server, a domain, or an open port. The bot dials out to Slack
@@ -105,7 +105,7 @@ cannot live under the same names.
 cp .env.example .env
 ```
 
-Put your model key in `.env`:
+Put your Anthropic key in `.env`:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
@@ -120,10 +120,6 @@ SLACK_APP_TOKEN=xapp-...
 
 Both files are git-ignored. A real environment variable beats both, so
 `SLACK_BOT_TOKEN=... scout run` always wins — handy for a one-off.
-
-> **No Anthropic key?** Run `ollama serve` and `ollama pull llama3.2:3b`
-> instead. Scout defaults to the local model when no key is set. It is less
-> precise at ranking roles, and free.
 
 Every other setting has a default. [docs/configuration.md](configuration.md)
 lists them all.
@@ -151,9 +147,8 @@ scout doctor — /Users/you/ScoutAI
   ✓ agent              bigtech — BigTech Agent
   ✓ env files          .env.bigtech > .env (first wins)
   ✓ slack              bot and app tokens present
-  ✓ models             default=anthropic; available: anthropic (claude-opus-5), ollama (…)
-  ✓ fallback           ollama, for one retry inside a failed turn
-  ✓ resume             data/my_resume.pdf
+  ✓ model              Claude (claude-opus-5)
+  ✓ resume             data/resume.pdf
   ✓ state              in memory — history and the parsed resume reset on restart
   ✓ referrals          /Users/you/ScoutAI/state/referrals.json (not created yet)
   ! digest             DIGEST_SLACK_USER unset — `scout digest` has nobody to DM
@@ -192,16 +187,9 @@ A handful of typed commands are intercepted before the model sees them:
 
 | Command | What it does |
 |---|---|
-| `--claude` | use the Anthropic API (also `--anthropic`) |
-| `--ollama` | use the local Ollama model |
-| `--api` | use the Meta Llama API (also `--llama`) |
-| `--backend` | say which model you are on |
+| `--status` | say which Claude model you are talking to |
 | `--reset` | clear your conversation history and re-read your résumé |
 | `--help` | list the commands |
-
-Switching models mid-conversation keeps the thread: history is stored as
-provider-agnostic messages, so each model renders the same conversation into its
-own format.
 
 Stop the bot with Ctrl-C.
 
@@ -268,7 +256,8 @@ setup uses a timer at 08:00 local. See [docs/deployment.md](deployment.md).
 | *"No resume found at data/resume.pdf"* | The file is missing or named something else. Save the résumé as `data/resume.pdf`. |
 | A new résumé has no effect | The profile is cached per user. Send `--reset`. |
 | *"Sorry, I got stuck calling my tools"* | The turn used its tool budget. Narrow the question, or raise `MAX_TOOL_HOPS`. |
-| Claude errors, and the reply says the local model answered | The fallback rescued the turn. Check the key, or `--ollama` deliberately. |
+| `:warning: Error: ANTHROPIC_API_KEY is not set` | Add the key to `.env` and restart. `scout doctor` reports it as a failure. |
+| `:warning: Error:` with an Anthropic API message | The call failed after `ChatAnthropic`'s own retries — an expired key, a rate limit, or an outage. There is no fallback model; send the message again once it clears. |
 | Two bots answer every DM | Two processes share one bot token. Each agent needs its own Slack app and its own `.env.<agent>`. |
 | Conversations with two bots are mixed together | They share a `CHECKPOINT_DB`. Give each agent its own path. |
 

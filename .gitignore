@@ -1,5 +1,5 @@
 # ─── Secrets & credentials ────────────────────────────────────────────────
-# Slack tokens (SLACK_BOT_TOKEN / SLACK_APP_TOKEN), LLAMA_API_KEY, etc.
+# Slack tokens (SLACK_BOT_TOKEN / SLACK_APP_TOKEN), ANTHROPIC_API_KEY, etc.
 # .env.example is the tracked, value-free template.
 .env
 .env.*

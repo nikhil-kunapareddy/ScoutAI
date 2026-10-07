@@ -119,4 +119,4 @@ SPEC = AgentSpec(
     name="Resume Parser",
     system_prompt=SYSTEM_PROMPT,
     tool_modules=[resume],
-)  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)
+)

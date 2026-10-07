@@ -61,7 +61,7 @@ The layout is asked for rather than rendered, because what an agent returns is
 prose — the structured `JobPosting` objects its tools built are gone by then,
 which is the same reason the thread is the only dedupe. The fields themselves
 were already identical across every source, from `render_postings`; pinning the
-request is what stops the *report* drifting between days and between backends.
+request is what stops the *report* drifting between days.
 Two rules in it earn their place: repeat the tool's date word for word (Workday
 gives only "5 Days Ago", Bloomberg gives nothing), and leave the title and date
 to the code, or the message grows two headers.
@@ -86,14 +86,13 @@ Every turn writes one line, from `GraphRunner.respond` — the single place that
 sees a whole turn:
 
 ```
-turn agent="BigTech Agent" thread=U0B8… backend=anthropic answered_by=anthropic \
-  outcome=ok seconds=12.4 model_calls=3 tool_calls=4 in_tokens=8123 out_tokens=512
+turn agent="BigTech Agent" thread=U0B8… outcome=ok seconds=12.4 \
+  model_calls=3 tool_calls=4 in_tokens=8123 out_tokens=512
 ```
 
 | Field | Meaning |
 |---|---|
 | `outcome` | `ok`, `stuck` (ran out of tool hops), or `error` (raised out of the graph) |
-| `answered_by` | Differs from `backend` exactly when the fallback rescued the turn |
 | `model_calls` | One per hop through the model node — the hop count, in effect |
 | `in_tokens` / `out_tokens` | Summed across the turn's model calls |
 | `usd` | Only when `USD_PER_MTOK_IN`/`OUT` are set |
@@ -102,7 +101,7 @@ turn agent="BigTech Agent" thread=U0B8… backend=anthropic answered_by=anthropi
 CloudWatch Logs Insights if the box's role is ever granted Logs, and readable as-is.
 
 Rates are configuration rather than a table baked into the code — they differ
-per backend, they change, and a stale hard-coded number is worse than none.
+per model, they change, and a stale hard-coded number is worse than none.
 Tokens are always reported, so spend stays derivable after the fact either way.
 
 ## Reading them back
@@ -143,13 +142,13 @@ One turn is one trace, rooted in a span Scout opens itself:
 ```
 answer-slack-dm                     ← the trace: input = your message, output = the reply
 └─ parse_resume                        the résumé stage, once per thread
-│  ├─ ChatOllama          generation   model + token usage
+│  ├─ ChatAnthropic       generation   model + token usage
 │  └─ get_resume_profile  tool
 └─ job_agent              agent        the job agent, as its own node in the agent graph
-   ├─ ChatOllama          generation
+   ├─ ChatAnthropic       generation
    ├─ get_current_time    tool
    ├─ search_netflix_jobs tool
-   └─ ChatOllama          generation   what it decided after the tools answered
+   └─ ChatAnthropic       generation   what it decided after the tools answered
 ```
 
 | In Langfuse | Is |
@@ -159,7 +158,6 @@ answer-slack-dm                     ← the trace: input = your message, output 
 | Session | The checkpointer thread — so a user's turns line up in the order the bot replays them, and `digest:bigtech` is its own session |
 | User | The same id. A digest thread is not a person and is not dressed up as one |
 | Tags | The agent's display name, and `slack` or `digest` — the dimension worth comparing cost and latency across, since a digest turn sweeps every source on a raised hop limit |
-| Metadata | `scout_backend`, the backend the turn was *asked* for. It differs from the model on the generation exactly when the fallback rescued the turn |
 | Release | `scout.__version__`, which is the one thing a log line cannot tell you after a redeploy |
 | Environment | `LANGFUSE_ENVIRONMENT`, when set |
 
@@ -179,7 +177,7 @@ wired, and they are the ones worth trusting:
 - **An unreachable Langfuse costs nothing.** Export is batched on a background
   thread, so a turn does not wait for it. `scout digest` shuts the client down
   on the way out — what Langfuse asks a short-lived process to do — which is the
-  one place a dead backend costs a couple of seconds, after the DM has already
+  one place a dead Langfuse costs a couple of seconds, after the DM has already
   been sent.
 - **The handler is built on the first traced turn, never at import**, so
   `scout doctor`, `scout stats`, and the test suite start no exporter thread.
@@ -220,8 +218,9 @@ Common outcomes:
 
 - **`outcome=stuck` on every turn** — the question needs more hops than
   `MAX_TOOL_HOPS` allows, or a source is timing out and eating the budget.
-- **`answered_by` never matches `backend`** — the hosted key is missing,
-  expired, or rate-limited, and every turn is being rescued by the fallback.
+- **`outcome=error` on every turn** — the Anthropic key is missing, expired, or
+  rate-limited. There is no fallback model, so `scout doctor` and the error in
+  the reply are where to look.
 - **Nothing in the log at all** — the websocket is gone but the process is
   alive. `systemctl restart scout@<agent>`.
 - **Turns are logged but no traces arrive** — `scout doctor` will say whether

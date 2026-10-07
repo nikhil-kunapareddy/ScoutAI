@@ -211,7 +211,7 @@ SPEC = AgentSpec(
     tool_modules=[clock, referrals_read, greenhouse],
     tailor_with_resume=True,
     in_digest=True,
-)  # default_backend omitted: inherits settings.DEFAULT_BACKEND
+)
 ```
 
 Then register it in `scout/agents/__init__.py`:

@@ -1,6 +1,6 @@
 """Platform configuration, loaded once from ``.env`` and ``.env.<agent>``.
 
-Agent-specific settings (system prompt, tool set, default backend) live on each
+Agent-specific settings (system prompt, tool set) live on each
 ``AgentSpec`` in ``scout/agents/``; this module holds only what all agents share
 — plus the one thing that cannot be shared, the Slack token pair, which comes
 from the per-agent file because each agent is a separate Slack app.
@@ -82,33 +82,13 @@ def _env_bool(name: str, default: bool) -> bool:
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")
 
-# --- Anthropic Claude (hosted, the platform default) ---
+# --- Anthropic Claude (the only model Scout runs on) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 ANTHROPIC_MAX_TOKENS = _env_int("ANTHROPIC_MAX_TOKENS", 16000)
 # Thinking depth / token spend: low | medium | high | xhigh | max. "medium" keeps
 # Slack replies snappy across a multi-hop tool loop.
 ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "medium")
-
-# --- Ollama (local) ---
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
-
-# --- Meta Llama API (hosted) ---
-# Reached through Meta's OpenAI-compatible endpoint, so this is a *base* URL and
-# not the full chat-completions path the old hand-rolled POST needed. Replaces
-# LLAMA_API_URL, which is ignored: trimming it would yield a non-compat base
-# that fails at request time instead of here.
-LLAMA_API_KEY = os.environ.get("LLAMA_API_KEY", "")
-LLAMA_MODEL = os.environ.get("LLAMA_MODEL", "Llama-4-Maverick-17B-128E-Instruct-FP8")
-LLAMA_BASE_URL = os.environ.get("LLAMA_BASE_URL", "https://api.llama.com/compat/v1")
-
-# --- Backend selection ---
-# Agents start on Claude and fall back to the local model for one turn when a
-# Claude request fails. With no key there is nothing to fall back *from*, so
-# Ollama becomes the default and the fallback is a no-op.
-DEFAULT_BACKEND = "anthropic" if ANTHROPIC_API_KEY else "ollama"
-FALLBACK_BACKEND = os.environ.get("FALLBACK_BACKEND", "ollama")
 
 # --- Conversation ---
 MAX_TURNS = _env_int("MAX_TURNS", 20)         # message pairs retained per user
@@ -146,7 +126,7 @@ DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 5)
 
 # --- Turn metrics ---
 # Dollars per million tokens, used to price each turn in the metrics line. Left
-# at 0 the line reports tokens only — rates differ per backend and change over
+# at 0 the line reports tokens only — rates differ per model and change over
 # time, so they are configuration rather than a table baked into the code. Fill
 # them from your provider's pricing page to get a usd= field.
 USD_PER_MTOK_IN = _env_float("USD_PER_MTOK_IN", 0.0)
@@ -180,7 +160,7 @@ LOG_MAX_BYTES = _env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
 LOG_BACKUP_COUNT = _env_int("LOG_BACKUP_COUNT", 3)
 
 # --- Model HTTP requests ---
-# Generous: generation on a local Ollama model can take minutes.
+# Generous: a long reply at a high effort can take minutes.
 MODEL_REQUEST_TIMEOUT_SECONDS = _env_int("MODEL_REQUEST_TIMEOUT_SECONDS", 300)
 
 # --- Tool HTTP requests ---
