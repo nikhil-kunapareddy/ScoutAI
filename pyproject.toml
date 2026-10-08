@@ -44,7 +44,7 @@ dependencies = [
     # `langchain` is not imported anywhere in this package — langfuse's LangChain
     # integration imports it to tell v0 from v1, and refuses to load without
     # it — so it is a dependency of the handler, not of Scout.
-    "langfuse>=4.0.0",
+    "langfuse>=4.17.0",
     "langchain>=1.4.0",
 ]
 
