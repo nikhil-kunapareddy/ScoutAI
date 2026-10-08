@@ -147,7 +147,7 @@ scout doctor — /Users/you/ScoutAI
   ✓ agent              bigtech — BigTech Agent
   ✓ env files          .env.bigtech > .env (first wins)
   ✓ slack              bot and app tokens present
-  ✓ model              Claude (claude-opus-5)
+  ✓ model              Claude (claude-haiku-4-5)
   ✓ resume             data/resume.pdf
   ✓ state              in memory — history and the parsed resume reset on restart
   ✓ referrals          /Users/you/ScoutAI/state/referrals.json (not created yet)

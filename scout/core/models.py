@@ -34,9 +34,9 @@ def _claude() -> BaseChatModel:
             "ANTHROPIC_API_KEY is not set. Add it to .env — Claude is the only model "
             "Scout runs on."
         )
-    # `thinking` is left unset deliberately: Opus 5 runs adaptive thinking by
-    # default, and `effort` (see _request_options) is the knob that trades depth
-    # for latency.
+    # `thinking` is left unset deliberately: Haiku 4.5 then runs without it, and
+    # the Opus and Sonnet 5 models run adaptive thinking, where `effort` (see
+    # _request_options) is the knob that trades depth for latency.
     return ChatAnthropic(
         model=settings.ANTHROPIC_MODEL,
         api_key=settings.ANTHROPIC_API_KEY,
@@ -49,8 +49,11 @@ def _request_options() -> dict:
     """Per-request options for Claude, applied after the tools are bound.
 
     ``effort`` has no field on ``ChatAnthropic`` — passing it in ``model_kwargs``
-    works but warns, so it is bound per request instead.
+    works but warns, so it is bound per request instead. It is sent only when
+    set: Haiku 4.5 rejects the option outright, so every request would fail.
     """
+    if not settings.ANTHROPIC_EFFORT:
+        return {}
     return {"output_config": {"effort": settings.ANTHROPIC_EFFORT}}
 
 

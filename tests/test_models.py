@@ -71,9 +71,21 @@ def test_tools_and_request_options_both_survive_binding(key, monkeypatch) -> Non
     ]
 
 
-def test_a_toolless_agent_still_gets_its_request_options(key) -> None:
+def test_a_toolless_agent_still_gets_its_request_options(key, monkeypatch) -> None:
     """The registry is empty for an agent that declares no tool modules."""
+    monkeypatch.setattr(settings, "ANTHROPIC_EFFORT", "medium")
+
     bound = models.with_tools([])
 
     assert "tools" not in bound.kwargs
-    assert bound.kwargs["output_config"] == {"effort": settings.ANTHROPIC_EFFORT}
+    assert bound.kwargs["output_config"] == {"effort": "medium"}
+
+
+def test_an_unset_effort_is_not_sent(key, monkeypatch) -> None:
+    """Haiku 4.5 rejects ``effort``, so an empty setting must leave it off the
+    request entirely rather than send an empty value."""
+    monkeypatch.setattr(settings, "ANTHROPIC_EFFORT", "")
+
+    bound = models.with_tools([])
+
+    assert "output_config" not in bound.kwargs

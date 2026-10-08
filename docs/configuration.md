@@ -53,9 +53,9 @@ app.
 | Variable | Default | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | **Required.** Claude is the only model every agent runs on; without a key every turn fails, and `scout doctor` says so. |
-| `ANTHROPIC_MODEL` | `claude-opus-5` | Any Claude model id. |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5` | Any Claude model id. Haiku 4.5 is the cheapest. |
 | `ANTHROPIC_MAX_TOKENS` | `16000` | Per-reply ceiling. |
-| `ANTHROPIC_EFFORT` | `medium` | Thinking depth: `low`, `medium`, `high`, `xhigh`, `max`. Trades latency for depth; `medium` keeps a multi-hop tool loop snappy in Slack. |
+| `ANTHROPIC_EFFORT` | empty | Thinking depth: `low`, `medium`, `high`, `xhigh`, `max`. Empty sends none, which Haiku 4.5 requires — it rejects the option. Set it for an Opus or Sonnet model; `medium` keeps a multi-hop tool loop snappy in Slack. |
 | `MODEL_REQUEST_TIMEOUT_SECONDS` | `300` | Generous, because a long reply at a high effort can take minutes. |
 
 There is no fallback model. `ChatAnthropic` retries transient API errors on its

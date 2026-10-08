@@ -84,11 +84,12 @@ SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")
 
 # --- Anthropic Claude (the only model Scout runs on) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 ANTHROPIC_MAX_TOKENS = _env_int("ANTHROPIC_MAX_TOKENS", 16000)
-# Thinking depth / token spend: low | medium | high | xhigh | max. "medium" keeps
-# Slack replies snappy across a multi-hop tool loop.
-ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "medium")
+# Thinking depth / token spend: low | medium | high | xhigh | max. Empty sends no
+# effort at all, which Haiku 4.5 requires: it rejects the option. Set it when
+# ANTHROPIC_MODEL names an Opus or Sonnet.
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "")
 
 # --- Conversation ---
 MAX_TURNS = _env_int("MAX_TURNS", 20)         # message pairs retained per user
