@@ -29,6 +29,8 @@ cover_letter*
 *.resume
 downloads/
 exports/
+# Personal working notes.
+notes.md
 
 # ─── Runtime logs & state ─────────────────────────────────────────────────
 logs/*
