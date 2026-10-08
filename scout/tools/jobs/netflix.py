@@ -6,7 +6,7 @@ server-side, so we hand it the terms and format what comes back.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -17,6 +17,7 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
+    parse_unix_timestamp,
     render_postings,
     take_newest,
 )
@@ -26,7 +27,8 @@ SEARCH_URL = "https://explore.jobs.netflix.net/api/apply/v2/jobs"
 JOB_BASE_URL = "https://explore.jobs.netflix.net/careers/job/"
 ORGANIZATION = "Netflix"
 
-API_PAGE_SIZE = 50  # rows per query, before filtering
+#: Rows per query, before filtering.
+API_PAGE_SIZE = 50
 
 
 def register(reg: ToolRegistry) -> None:
@@ -44,8 +46,10 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or widen your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or widen your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -78,6 +82,7 @@ def _postings_for(query: str) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, newest US roles first."""
     return {
         "domain": "netflix.com",
         "query": query,
@@ -101,9 +106,4 @@ def _to_posting(position: dict, job_id: str, title: str) -> JobPosting:
 
 def _parse_created(timestamp: object) -> datetime | None:
     """Parse ``t_create`` (unix seconds, sometimes missing) as UTC."""
-    if not isinstance(timestamp, int | float):
-        return None
-    try:
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
+    return parse_unix_timestamp(timestamp)

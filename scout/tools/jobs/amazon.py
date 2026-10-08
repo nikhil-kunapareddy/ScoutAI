@@ -28,9 +28,11 @@ SEARCH_URL = "https://www.amazon.jobs/en/search.json"
 JOB_BASE_URL = "https://www.amazon.jobs"
 ORGANIZATION = "Amazon"
 
-DEFAULT_DAYS = 1  # last 24h
+#: The tool's default window: the last 24h.
+DEFAULT_DAYS = 1
 MAX_DAYS = 30
-API_PAGE_SIZE = 100  # rows per query, before filtering
+#: Rows per query, before filtering.
+API_PAGE_SIZE = 100
 
 
 def register(reg: ToolRegistry) -> None:
@@ -52,8 +54,10 @@ def register(reg: ToolRegistry) -> None:
 
         postings = search(keywords, limit, days)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found in the {window}. "
-                    "Try again later or widen the window.")
+            return (
+                f"No relevant {ORGANIZATION} roles found in the {window}. "
+                "Try again later or widen the window."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles ({window}) — {{count}} found:*", postings
         )
@@ -89,6 +93,7 @@ def _postings_for(query: str, cutoff: datetime) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, newest US roles first."""
     return {
         "base_query": query,
         "normalized_country_code[]": "USA",

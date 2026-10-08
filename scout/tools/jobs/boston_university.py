@@ -26,9 +26,7 @@ ORGANIZATION = "Boston University"
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_boston_university_jobs(
-        keywords: str = "", limit: int = DEFAULT_LIMIT
-    ) -> str:
+    def search_boston_university_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
         """Search Boston University's careers site for recent job openings and
         return each role's title, location, date posted, and link.
 
@@ -43,8 +41,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers feed right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*", postings
         )
@@ -64,9 +64,7 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
 
     terms = keywords.lower().split()
     postings = [
-        posting
-        for item in feeds.items(feed)
-        if (posting := _to_posting(item, terms)) is not None
+        posting for item in feeds.items(feed) if (posting := _to_posting(item, terms)) is not None
     ]
     return take_newest(postings, limit)
 
@@ -84,7 +82,8 @@ def _to_posting(item: str, terms: list[str]) -> JobPosting | None:
         url=feeds.tag_text(item, "link"),
         location=feeds.tag_text(item, "location"),
         date=_parse_posted_date(raw_date),
-        posted_label=raw_date,  # shown verbatim when the date won't parse
+        # Shown verbatim when the date won't parse.
+        posted_label=raw_date,
     )
 
 

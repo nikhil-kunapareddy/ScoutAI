@@ -11,15 +11,17 @@ from ..registry import ToolRegistry
 from . import fetch
 from .posting import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int, render_postings
 
-# POST https://{host}/wday/cxs/{tenant}/{site}/jobs
+#: The parts of the Workday CXS endpoint, POST https://{host}/wday/cxs/{tenant}/{site}/jobs.
 HOST = "northeastern.wd1.myworkdayjobs.com"
 TENANT = "northeastern"
 SITE = "Careers"
 JOBS_URL = f"https://{HOST}/wday/cxs/{TENANT}/{SITE}/jobs"
 
 ORGANIZATION = "Northeastern University"
-DEFAULT_SEARCH = "machine learning"  # when the model passes no keywords
-API_PAGE_SIZE = 20                   # Workday caps page size at 20
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: Workday caps a page at 20 rows.
+API_PAGE_SIZE = 20
 
 
 def register(reg: ToolRegistry) -> None:
@@ -37,11 +39,11 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return "Couldn't reach Northeastern's careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
-            f"*Latest {ORGANIZATION} roles — {{count}} found:*", postings
-        )
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_postings(f"*Latest {ORGANIZATION} roles — {{count}} found:*", postings)
 
 
 def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
@@ -51,13 +53,14 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-    rows = fetch.post_rows(JOBS_URL, "jobPostings", _query(keywords, limit))
+    rows = fetch.post_rows(JOBS_URL, "jobPostings", _payload(keywords, limit))
     if rows is None:
         return None
     return [_to_posting(job) for job in rows[:limit]]
 
 
-def _query(keywords: str, limit: int) -> dict[str, object]:
+def _payload(keywords: str, limit: int) -> dict[str, object]:
+    """The POST body for one search, at most one page long."""
     return {
         "appliedFacets": {},
         "limit": min(limit, API_PAGE_SIZE),
@@ -74,5 +77,6 @@ def _to_posting(job: dict) -> JobPosting:
         organization=ORGANIZATION,
         url=f"https://{HOST}/{SITE}{path}" if path else "",
         location=(job.get("locationsText") or "").strip(),
-        posted_label=(job.get("postedOn") or "").strip(),  # relative, not a date
+        # Relative ("Posted 5 Days Ago"), not a date.
+        posted_label=(job.get("postedOn") or "").strip(),
     )

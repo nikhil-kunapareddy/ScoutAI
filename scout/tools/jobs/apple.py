@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from functools import partial
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -28,7 +29,10 @@ from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
+    merge_queries,
+    parse_iso_timestamp,
     render_postings,
     take_newest,
 )
@@ -38,16 +42,17 @@ SEARCH_URL = "https://jobs.apple.com/en-us/search"
 JOB_BASE_URL = "https://jobs.apple.com/en-us/details"
 ORGANIZATION = "Apple"
 
-US_LOCATION = "united-states-USA"     # Apple's own id for the US filter
-DEFAULT_SEARCH = "machine learning"   # when the model passes no keywords
-API_PAGE_SIZE = 20                    # fixed by the page
+#: Apple's own id for the US filter.
+US_LOCATION = "united-states-USA"
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: Rows per page, fixed by the page itself.
+API_PAGE_SIZE = 20
 PAGES = 2
 
 #: The hydration blob is a JS string literal holding JSON, so it needs decoding
 #: twice — once out of the literal, once as JSON.
-_STATE_RE = re.compile(
-    r'window\.__staticRouterHydrationData\s*=\s*JSON\.parse\("(.*?)"\);', re.S
-)
+_STATE_RE = re.compile(r'window\.__staticRouterHydrationData\s*=\s*JSON\.parse\("(.*?)"\);', re.S)
 
 
 def register(reg: ToolRegistry) -> None:
@@ -65,8 +70,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -85,22 +92,23 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
     query = keywords.strip() or DEFAULT_SEARCH
-
-    found: dict[str, JobPosting] = {}
-    reached = False
-    for page in range(1, PAGES + 1):
-        rows = _results_for(query, page)
-        if rows is None:
-            continue
-        reached = True
-        for row in rows:
-            posting = _to_posting(row)
-            if posting is not None:
-                found.setdefault(str(row.get("positionId")), posting)
-    return take_newest(list(found.values()), limit) if reached else None
+    found = merge_queries(range(1, PAGES + 1), partial(_postings_for, query))
+    return None if found is None else take_newest(found, limit)
 
 
-def _results_for(query: str, page: int) -> list[dict] | None:
+def _postings_for(query: str, page: int) -> QueryResults:
+    """One results page, as (position id, posting) pairs, or None if unreachable."""
+    rows = _rows_for(query, page)
+    if rows is None:
+        return None
+    return [
+        (str(row.get("positionId")), posting)
+        for row in rows
+        if (posting := _to_posting(row)) is not None
+    ]
+
+
+def _rows_for(query: str, page: int) -> list[dict] | None:
     """One results page, or None if it could not be read."""
     html = fetch.get_text(SEARCH_URL, _params(query, page))
     if html is None:
@@ -131,8 +139,11 @@ def _hydration_state(html: str) -> dict | None:
 
 
 def _params(query: str, page: int) -> dict[str, str | int]:
-    # sort=relevance on every page: Apple drops it when paging, and without it
-    # the results are retail roles that merely mention the search term.
+    """The query string for one results page.
+
+    ``sort=relevance`` on every page: Apple drops it when paging, and without it
+    the results are retail roles that merely mention the search term.
+    """
     return {
         "search": query,
         "location": US_LOCATION,
@@ -171,14 +182,5 @@ def _location_text(locations: object) -> str:
 
 
 def _parse_posted(raw: object) -> datetime | None:
-    """Parse ``postDateInGMT``, e.g. 2026-09-16T22:06:11.615Z.
-
-    ``Z`` is normalised first: ``fromisoformat`` only learned to read it in 3.11,
-    and this package supports 3.10.
-    """
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    """Parse ``postDateInGMT``, e.g. 2026-09-16T22:06:11.615Z."""
+    return parse_iso_timestamp(raw)

@@ -35,8 +35,10 @@ WIDGETS_URL = "https://careers.cisco.com/widgets"
 JOB_BASE_URL = "https://careers.cisco.com/global/en/job"
 ORGANIZATION = "Cisco"
 
-US = "United States of America"       # the exact string the country facet wants
-DEFAULT_SEARCH = "machine learning"   # when the model passes no keywords
+#: The exact string the country facet wants.
+US = "United States of America"
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
 API_PAGE_SIZE = 100
 
 
@@ -55,8 +57,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -70,16 +74,14 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-    rows = _jobs(keywords.strip() or DEFAULT_SEARCH)
+    rows = _rows_for(keywords.strip() or DEFAULT_SEARCH)
     if rows is None:
         return None
-    postings = [
-        posting for row in rows if (posting := _to_posting(row)) is not None
-    ]
+    postings = [posting for row in rows if (posting := _to_posting(row)) is not None]
     return take_newest(postings, limit)
 
 
-def _jobs(query: str) -> list[dict] | None:
+def _rows_for(query: str) -> list[dict] | None:
     """The rows, or None if the widget could not be read.
 
     They sit two levels down, under the ``ddoKey`` the request asked for, so a
@@ -99,6 +101,7 @@ def _jobs(query: str) -> list[dict] | None:
 
 
 def _payload(query: str) -> dict[str, object]:
+    """The POST body for one search: newest US roles, one page of them."""
     return {
         "lang": "en_global",
         "deviceType": "desktop",

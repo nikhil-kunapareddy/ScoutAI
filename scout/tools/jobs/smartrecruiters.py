@@ -23,17 +23,18 @@ from datetime import datetime
 
 from ..registry import ToolRegistry
 from .hosted_board import HostedBoard
-from .posting import DEFAULT_LIMIT, JobPosting
+from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp
 from .relevance import is_ai_ml_role, matches_keywords
 
 BOARD_URL = "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&country=us"
 JOB_BASE_URL = "https://jobs.smartrecruiters.com"
 
-# Board slug -> display name. Add a company = add a line. All verified live.
+#: Board slug -> display name. Add a company = add a line. All verified live.
 BOARDS = {
     "servicenow": "ServiceNow",
 }
 
+#: SmartRecruiters' structured ``location.country`` for a US role.
 US = "us"
 
 
@@ -81,17 +82,8 @@ def _location_text(location: dict) -> str:
 
 
 def _parse_released(raw: object) -> datetime | None:
-    """Parse ``releasedDate``, e.g. 2026-09-19T02:10:29.545Z.
-
-    ``Z`` is normalised first: ``fromisoformat`` only learned to read it in 3.11,
-    and this package supports 3.10.
-    """
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    """Parse ``releasedDate``, e.g. 2026-09-19T02:10:29.545Z."""
+    return parse_iso_timestamp(raw)
 
 
 BOARD = HostedBoard(

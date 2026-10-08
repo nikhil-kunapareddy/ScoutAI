@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import html
 import re
+from functools import partial
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -27,7 +28,9 @@ from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
+    merge_queries,
     render_postings,
 )
 from .relevance import is_ai_ml_role
@@ -35,12 +38,15 @@ from .relevance import is_ai_ml_role
 SEARCH_URL = "https://bloomberg.avature.net/careers/SearchJobs/"
 ORGANIZATION = "Bloomberg"
 
-US = "united states"                  # matched against the rendered location text
-DEFAULT_SEARCH = "machine learning"   # when the model passes no keywords
-API_PAGE_SIZE = 12                    # fixed by the board; the per-page param is ignored
+#: Matched against the rendered location text.
+US = "united states"
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: Rows per page, fixed by the board; the per-page parameter is ignored.
+API_PAGE_SIZE = 12
 PAGES = 3
 
-# Shown instead of a date, so the model doesn't invent one.
+#: Shown instead of a date, so the model doesn't invent one.
 NO_DATE_LABEL = "not published by Bloomberg"
 
 _ARTICLE_RE = re.compile(r'<article class="article article--result".*?</article>', re.S)
@@ -69,8 +75,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles — {{count}} found:*",
             postings,
@@ -89,29 +97,26 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
     query = keywords.strip() or DEFAULT_SEARCH
-
-    found: dict[str, JobPosting] = {}
-    reached = False
-    for page in range(PAGES):
-        postings = _postings_for(query, page * API_PAGE_SIZE)
-        if postings is None:
-            continue
-        reached = True
-        for posting in postings:
-            found.setdefault(posting.url, posting)
-    return list(found.values())[:limit] if reached else None
+    offsets = range(0, PAGES * API_PAGE_SIZE, API_PAGE_SIZE)
+    found = merge_queries(offsets, partial(_postings_for, query))
+    return None if found is None else found[:limit]
 
 
-def _postings_for(query: str, offset: int) -> list[JobPosting] | None:
-    """One results page, or None if it could not be read."""
-    page = fetch.get_text(SEARCH_URL, {"search": query, "jobOffset": offset})
+def _postings_for(query: str, offset: int) -> QueryResults:
+    """One results page, as (url, posting) pairs, or None if it could not be read."""
+    page = fetch.get_text(SEARCH_URL, _params(query, offset))
     if page is None:
         return None
     return [
-        posting
+        (posting.url, posting)
         for article in _ARTICLE_RE.findall(page)
         if (posting := _to_posting(article)) is not None
     ]
+
+
+def _params(query: str, offset: int) -> dict[str, str | int]:
+    """The query string for one results page."""
+    return {"search": query, "jobOffset": offset}
 
 
 def _to_posting(article: str) -> JobPosting | None:
@@ -128,7 +133,8 @@ def _to_posting(article: str) -> JobPosting | None:
     return JobPosting(
         title=title,
         organization=ORGANIZATION,
-        url=url,  # Avature renders these absolute
+        # Avature renders these absolute.
+        url=url,
         location=location,
         posted_label=NO_DATE_LABEL,
     )

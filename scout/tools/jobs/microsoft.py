@@ -18,7 +18,8 @@ here rather than asked for.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
+from functools import partial
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -26,7 +27,10 @@ from .posting import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     JobPosting,
+    QueryResults,
     clamp_int,
+    merge_queries,
+    parse_unix_timestamp,
     render_postings,
     take_newest,
 )
@@ -38,9 +42,12 @@ ORGANIZATION = "Microsoft"
 
 DOMAIN = "microsoft.com"
 US = "United States"
-DEFAULT_SEARCH = "machine learning"  # when the model passes no keywords
-API_PAGE_SIZE = 10                   # fixed by the API; `num` is ignored
-PAGES = 2                            # kept small: the endpoint rate-limits
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: Rows per page, fixed by the API; ``num`` is ignored.
+API_PAGE_SIZE = 10
+#: Kept small: the endpoint rate-limits.
+PAGES = 2
 
 
 def register(reg: ToolRegistry) -> None:
@@ -58,8 +65,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -77,19 +86,21 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
     query = keywords.strip() or DEFAULT_SEARCH
+    starts = range(0, PAGES * API_PAGE_SIZE, API_PAGE_SIZE)
+    found = merge_queries(starts, partial(_postings_for, query))
+    return None if found is None else take_newest(found, limit)
 
-    found: dict[str, JobPosting] = {}
-    reached = False
-    for page in range(PAGES):
-        rows = _rows_for(query, page * API_PAGE_SIZE)
-        if rows is None:
-            continue
-        reached = True
-        for row in rows:
-            posting = _to_posting(row)
-            if posting is not None:
-                found.setdefault(_job_id(row, posting), posting)
-    return take_newest(list(found.values()), limit) if reached else None
+
+def _postings_for(query: str, start: int) -> QueryResults:
+    """One page, as (requisition id, posting) pairs, or None if it could not be read."""
+    rows = _rows_for(query, start)
+    if rows is None:
+        return None
+    return [
+        (_job_id(row, posting), posting)
+        for row in rows
+        if (posting := _to_posting(row)) is not None
+    ]
 
 
 def _rows_for(query: str, start: int) -> list[dict] | None:
@@ -109,6 +120,7 @@ def _rows_for(query: str, start: int) -> list[dict] | None:
 
 
 def _params(query: str, start: int) -> dict[str, str | int]:
+    """The query string for one page of US results."""
     return {"domain": DOMAIN, "query": query, "location": US, "start": start}
 
 
@@ -143,9 +155,4 @@ def _location_text(locations: object) -> str:
 
 def _parse_posted(raw: object) -> datetime | None:
     """Parse ``postedTs``, a Unix timestamp in seconds (e.g. 1789415386)."""
-    if isinstance(raw, bool) or not isinstance(raw, int | float):
-        return None
-    try:
-        return datetime.fromtimestamp(raw, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
+    return parse_unix_timestamp(raw)

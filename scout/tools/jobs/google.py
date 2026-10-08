@@ -25,11 +25,11 @@ SEARCH_URL = "https://www.google.com/about/careers/applications/jobs/results/"
 JOB_BASE_URL = "https://www.google.com/about/careers/applications/"
 ORGANIZATION = "Google"
 
-# Shown instead of a date, so the model doesn't invent one.
+#: Shown instead of a date, so the model doesn't invent one.
 NO_DATE_LABEL = "not published by Google"
 
-# Each job is a "Learn more" anchor: href to jobs/results/{id}-{slug}, with the
-# clean title in the aria-label.
+#: Each job is a "Learn more" anchor: href to jobs/results/{id}-{slug}, with the
+#: clean title in the aria-label.
 _JOB_RE = re.compile(
     r'href="(jobs/results/\d+-[^"?]+)[^"]*"[^>]*aria-label="Learn more about ([^"]+)"'
 )
@@ -92,6 +92,7 @@ def _job_id(href: str) -> str:
 
 
 def _params(query: str) -> dict[str, str]:
+    """The query string for one results page, newest US roles first."""
     return {"q": query, "location": "United States", "sort_by": "date"}
 
 

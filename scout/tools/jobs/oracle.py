@@ -35,16 +35,18 @@ from .posting import (
 from .relevance import is_ai_ml_role
 
 API_URL = (
-    "https://eeho.fa.us2.oraclecloud.com"
-    "/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 )
 JOB_BASE_URL = "https://careers.oracle.com/en/sites/jobsearch/job"
 ORGANIZATION = "Oracle"
 
 SITE_NUMBER = "CX_45001"
-US_FACET = "300000000149325"          # "United States"
-DEFAULT_SEARCH = "machine learning"   # when the model passes no keywords
-API_PAGE_SIZE = 200                   # one page covers the US AI/ML slice
+#: The location facet id for "United States".
+US_FACET = "300000000149325"
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: One page covers the US AI/ML slice.
+API_PAGE_SIZE = 200
 
 
 def register(reg: ToolRegistry) -> None:
@@ -62,8 +64,10 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -77,16 +81,14 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-    rows = _requisitions(keywords.strip() or DEFAULT_SEARCH)
+    rows = _rows_for(keywords.strip() or DEFAULT_SEARCH)
     if rows is None:
         return None
-    postings = [
-        posting for row in rows if (posting := _to_posting(row)) is not None
-    ]
+    postings = [posting for row in rows if (posting := _to_posting(row)) is not None]
     return take_newest(postings, limit)
 
 
-def _requisitions(query: str) -> list[dict] | None:
+def _rows_for(query: str) -> list[dict] | None:
     """The postings, or None if the board could not be read.
 
     A missing ``requisitionList`` means the request lost its ``expand`` — the

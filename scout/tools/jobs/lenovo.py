@@ -65,8 +65,10 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or widen your keywords.")
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or widen your keywords."
+            )
         return render_postings(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
@@ -97,6 +99,7 @@ def _postings_for(query: str) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, pinned to US roles."""
     return {
         **US_FACET,
         "listFilterMode": 1,
@@ -121,7 +124,8 @@ def _to_posting(item: str) -> JobPosting | None:
         organization=ORGANIZATION,
         url=feeds.tag_text(item, "link"),
         date=_parse_pub_date(raw_date),
-        posted_label=raw_date,  # shown verbatim when the date won't parse
+        # Shown verbatim when the date won't parse.
+        posted_label=raw_date,
     )
 
 
