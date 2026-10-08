@@ -117,9 +117,16 @@ def _run(_args: argparse.Namespace) -> int:
 
 def _digest(_args: argparse.Namespace) -> int:
     """Run the active agent's digest once, now."""
+    # `scout digest` lands here. By now `main` has already set AGENT from
+    # --agent. _args is unused: --agent was the only option, and it's handled.
+    #
+    # scout/digest.py — main: runs this agent's digest and DMs you the result.
+    # Imported here, not at the top: scout.digest imports settings, and settings
+    # must load only after AGENT is set, so it picks up the right .env.<agent>.
     from .digest import main as run_digest
 
     run_digest()
+    # 0 means success. Missing config already exited inside run_digest.
     return 0
 
 

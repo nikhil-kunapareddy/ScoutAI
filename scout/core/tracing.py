@@ -194,8 +194,11 @@ def shutdown() -> None:
     if _handler is None:
         return  # nothing was traced, so there is nothing queued
     try:
+        # Imported inside the try, so even a broken Langfuse install is only
+        # logged and cannot fail a digest that was already sent.
         from langfuse import get_client
 
+        # Send the queued traces, then stop the background sender.
         get_client().shutdown()
     except Exception:
         log.exception("Could not shut Langfuse down cleanly")
