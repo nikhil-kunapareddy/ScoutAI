@@ -37,12 +37,9 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3.1.1",
     "langchain-core>=1.6.3",
     "langchain-anthropic>=1.7.2",
-    "langchain-ollama>=1.1.0",
-    "langchain-openai>=1.6.2",
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
     "pypdf>=6.18.1",
-    "docx2txt>=0.8",
     # Agent observability: the per-turn call tree, wired up in core/tracing.py.
     # `langchain` is not imported anywhere in this package — langfuse's LangChain
     # integration imports it to tell v0 from v1, and refuses to load without
@@ -115,11 +112,6 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unused_configs = true
 warn_return_any = true
-
-[[tool.mypy.overrides]]
-# No type information published upstream.
-module = ["docx2txt"]
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # LangChain's chat models are pydantic models with populate-by-name aliases

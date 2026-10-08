@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -17,19 +19,20 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
-    render_postings,
+    source_id,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 SEARCH_URL = "https://www.google.com/about/careers/applications/jobs/results/"
 JOB_BASE_URL = "https://www.google.com/about/careers/applications/"
 ORGANIZATION = "Google"
 
-# Shown instead of a date, so the model doesn't invent one.
+#: Shown instead of a date, so the model doesn't invent one.
 NO_DATE_LABEL = "not published by Google"
 
-# Each job is a "Learn more" anchor: href to jobs/results/{id}-{slug}, with the
-# clean title in the aria-label.
+#: Each job is a "Learn more" anchor: href to jobs/results/{id}-{slug}, with the
+#: clean title in the aria-label.
 _JOB_RE = re.compile(
     r'href="(jobs/results/\d+-[^"?]+)[^"]*"[^>]*aria-label="Learn more about ([^"]+)"'
 )
@@ -37,7 +40,10 @@ _JOB_RE = re.compile(
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_google_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_google_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Google's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return each role's title and link.
 
@@ -52,10 +58,11 @@ def register(reg: ToolRegistry) -> None:
         postings = search(keywords, limit)
         if not postings:
             return f"No relevant {ORGANIZATION} roles found right now. Try again later."
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
             footer="_Google doesn't publish posting dates; roles are listed newest-first._",
+            config=config,
         )
 
 
@@ -92,6 +99,7 @@ def _job_id(href: str) -> str:
 
 
 def _params(query: str) -> dict[str, str]:
+    """The query string for one results page, newest US roles first."""
     return {"q": query, "location": "United States", "sort_by": "date"}
 
 
@@ -102,4 +110,5 @@ def _to_posting(href: str, title: str) -> JobPosting:
         organization=ORGANIZATION,
         url=JOB_BASE_URL + href,
         posted_label=NO_DATE_LABEL,
+        job_id=source_id("google", _job_id(href)),
     )

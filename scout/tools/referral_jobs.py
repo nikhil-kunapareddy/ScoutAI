@@ -22,7 +22,8 @@ from langchain_core.runnables import RunnableConfig
 from ..core import referrals
 from ..core.referrals import Referral, ReferralStoreError
 from .jobs.directory import CompanySource, resolve
-from .jobs.posting import JobPosting, clamp_int, render_postings
+from .jobs.posting import JobPosting, clamp_int
+from .jobs.unsent import render_unsent
 from .registry import ToolRegistry
 
 DEFAULT_PER_COMPANY = 5
@@ -77,7 +78,7 @@ def register(reg: ToolRegistry) -> None:
 
         limit = clamp_int(limit_per_company, DEFAULT_PER_COMPANY, 1, MAX_PER_COMPANY)
         searched, uncovered = _scan(listed, keywords, limit)
-        return _render(searched, uncovered)
+        return _render(searched, uncovered, config)
 
 
 def _scan(
@@ -108,7 +109,7 @@ def _scan(
         return list(pool.map(run, targets)), uncovered
 
 
-def _render(searched: list[Outcome], uncovered: list[str]) -> str:
+def _render(searched: list[Outcome], uncovered: list[str], config: RunnableConfig) -> str:
     """One merged list, plus the coverage the user needs to trust it."""
     reached = [outcome for outcome in searched if outcome.postings is not None]
     postings = [posting for outcome in reached for posting in outcome.postings or []]
@@ -140,9 +141,10 @@ def _render(searched: list[Outcome], uncovered: list[str]) -> str:
         return f"{opening}\n\n{footer}" if footer else opening
 
     total = len(searched) + len(uncovered)
-    return render_postings(
+    return render_unsent(
         f"*Openings where you have a referral — {{count}} at {len(reached)} "
         f"of your {total} companies:*",
         postings,
         footer=footer,
+        config=config,
     )

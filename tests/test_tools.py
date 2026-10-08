@@ -7,8 +7,6 @@ failure has to be a sentence and never an exception.
 
 from __future__ import annotations
 
-import os
-import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -94,7 +92,7 @@ def test_a_missing_data_folder_says_where_to_put_the_resume(monkeypatch, tmp_pat
 
     reply = run(resume, "get_resume_profile")
 
-    assert "No data/ folder" in reply
+    assert "No resume found at data/resume.pdf" in reply
     assert "PDF" in reply
 
 
@@ -104,31 +102,21 @@ def test_an_empty_data_folder_asks_for_a_resume(monkeypatch, tmp_path) -> None:
     assert "No resume found" in run(resume, "get_resume_profile")
 
 
-def test_a_text_resume_is_returned_with_its_filename(monkeypatch, tmp_path) -> None:
-    (tmp_path / "resume.txt").write_text("Sai — ML Engineer\nPyTorch, Spark")
+def test_the_resume_is_returned_with_its_filename(monkeypatch, tmp_path) -> None:
+    _write_pdf(tmp_path / "resume.pdf", "Sai - ML Engineer, PyTorch, Spark")
     monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
 
     reply = run(resume, "get_resume_profile")
 
-    assert "Resume file: resume.txt" in reply
+    assert reply.startswith(f"Resume file: {tmp_path.name}/resume.pdf")
     assert "PyTorch, Spark" in reply
 
 
-def test_the_most_recent_resume_wins(monkeypatch, tmp_path) -> None:
-    """Dropping in a new resume should take effect without deleting the old one."""
-    old = tmp_path / "2024.md"
-    old.write_text("the old one")
-    new = tmp_path / "2026.md"
-    new.write_text("the new one")
-    os.utime(old, (1_000_000, 1_000_000))
-    monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
-
-    assert "the new one" in run(resume, "get_resume_profile")
-
-
-def test_files_that_are_not_resumes_are_ignored(monkeypatch, tmp_path) -> None:
-    (tmp_path / "referrals.json").write_text("{}")
-    (tmp_path / ".gitkeep").write_text("")
+def test_only_resume_pdf_is_read(monkeypatch, tmp_path) -> None:
+    """A resume under any other name, or in any other format, is not the resume."""
+    _write_pdf(tmp_path / "sai_resume0807.pdf", "an old one")
+    (tmp_path / "resume.txt").write_text("a text one")
+    (tmp_path / "resume.docx").write_bytes(b"a word one")
     monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
 
     assert "No resume found" in run(resume, "get_resume_profile")
@@ -136,7 +124,7 @@ def test_files_that_are_not_resumes_are_ignored(monkeypatch, tmp_path) -> None:
 
 def test_an_empty_resume_is_reported_as_unreadable(monkeypatch, tmp_path) -> None:
     """A scanned PDF reads as empty text, which is worth saying out loud."""
-    (tmp_path / "scan.txt").write_text("   \n")
+    _write_pdf(tmp_path / "resume.pdf", "")
     monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
 
     assert "empty or unreadable" in run(resume, "get_resume_profile")
@@ -148,7 +136,7 @@ def test_a_corrupt_file_names_the_file_instead_of_raising(monkeypatch, tmp_path)
 
     reply = run(resume, "get_resume_profile")
 
-    assert reply.startswith("Could not read resume 'resume.pdf'")
+    assert reply.startswith(f"Could not read resume '{tmp_path.name}/resume.pdf'")
 
 
 def test_the_resume_folder_can_be_moved(monkeypatch, tmp_path) -> None:
@@ -156,34 +144,35 @@ def test_the_resume_folder_can_be_moved(monkeypatch, tmp_path) -> None:
     site-packages, where nobody wants to keep a resume."""
     elsewhere = tmp_path / "somewhere" / "else"
     elsewhere.mkdir(parents=True)
-    (elsewhere / "cv.md").write_text("relocated")
+    _write_pdf(elsewhere / "resume.pdf", "relocated")
     monkeypatch.setattr(settings, "RESUME_DIR", str(elsewhere))
 
-    assert resume.resume_dir() == elsewhere
+    assert resume.resume_path() == elsewhere / "resume.pdf"
     assert "relocated" in run(resume, "get_resume_profile")
 
 
-def test_a_folder_that_does_not_exist_holds_no_resumes(tmp_path) -> None:
-    """``scout doctor`` asks this of a path the user may not have created yet."""
-    assert resume.resumes_in(tmp_path / "nowhere") == []
-
-
-def test_a_docx_resume_is_read_as_text(monkeypatch, tmp_path) -> None:
-    _write_docx(tmp_path / "resume.docx", "Sai — ML Engineer at Northeastern")
-    monkeypatch.setattr(settings, "RESUME_DIR", str(tmp_path))
-
-    reply = run(resume, "get_resume_profile")
-
-    assert "Resume file: resume.docx" in reply
-    assert "ML Engineer at Northeastern" in reply
-
-
-def _write_docx(path: Path, text: str) -> None:
-    """The smallest .docx docx2txt will read: one paragraph in a zip."""
-    document = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"
+def _write_pdf(path: Path, text: str) -> None:
+    """The smallest PDF pypdf will read text from: one page, one line of Helvetica."""
+    content = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+            b" /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content),
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(pdf)
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    pdf += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1, xref,
     )
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("word/document.xml", document)
+    path.write_bytes(bytes(pdf))

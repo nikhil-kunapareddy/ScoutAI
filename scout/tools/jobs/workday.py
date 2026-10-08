@@ -4,7 +4,7 @@ Workday is to the enterprise what Greenhouse is to the startup: NVIDIA,
 Salesforce and Adobe all answer the same CXS endpoint, differing only in the
 host, tenant and site their URL is built from. So this is one shape filled in
 three times rather than three modules — the same call ``hosted_board`` makes for
-Greenhouse and Ashby. It is a separate shape from ``HostedBoard`` because
+Greenhouse, Ashby and SmartRecruiters. It is a separate shape from ``HostedBoard`` because
 nothing about the two lines up: Workday takes a POST body rather than a slug in
 a path, and its URL needs three parts rather than one.
 
@@ -29,7 +29,8 @@ union, which is the same thing ``amazon`` and ``google`` do.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
+
+from langchain_core.runnables import RunnableConfig
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -41,9 +42,10 @@ from .posting import (
     Searcher,
     clamp_int,
     merge_queries,
-    render_postings,
+    source_id,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 #: Workday rejects a page larger than this with a 400.
 API_PAGE_SIZE = 20
@@ -66,22 +68,22 @@ class WorkdayTenant:
 
     @property
     def jobs_url(self) -> str:
+        """The CXS search endpoint, which takes the query as a POST body."""
         return f"https://{self.host}/wday/cxs/{self.tenant}/{self.site}/jobs"
 
     @property
     def site_url(self) -> str:
+        """The public careers site, which a row's ``externalPath`` hangs off."""
         return f"https://{self.host}/{self.site}"
 
-    def search(
-        self, keywords: str = "", limit: int = DEFAULT_LIMIT
-    ) -> list[JobPosting] | None:
+    def search(self, keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
         """This tenant's US AI/ML openings, or None if Workday can't be reached.
 
         Not sorted: Workday publishes no date, so the order it returns — which
         is its own relevance ranking — is the only signal there is.
         """
         limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-        found = merge_queries(search_queries(keywords), partial(self._postings_for))
+        found = merge_queries(search_queries(keywords), self._postings_for)
         return None if found is None else found[:limit]
 
     def searcher(self) -> Searcher:
@@ -90,7 +92,7 @@ class WorkdayTenant:
 
     def _postings_for(self, query: str) -> QueryResults:
         """One page for one query, as (req id, posting) pairs, or None if down."""
-        rows = fetch.post_rows(self.jobs_url, "jobPostings", self._body(query))
+        rows = fetch.post_rows(self.jobs_url, "jobPostings", self._payload(query))
         if rows is None:
             return None
         return [
@@ -99,7 +101,8 @@ class WorkdayTenant:
             if (posting := self._to_posting(row)) is not None
         ]
 
-    def _body(self, query: str) -> dict[str, object]:
+    def _payload(self, query: str) -> dict[str, object]:
+        """The POST body for one query: US roles only, one page."""
         return {
             "appliedFacets": {self.country_facet: [self.us_facet_id]},
             "limit": API_PAGE_SIZE,
@@ -120,21 +123,32 @@ class WorkdayTenant:
             # Often "3 Locations" rather than a place; the US filter is the
             # server-side facet above, so this is display only.
             location=(job.get("locationsText") or "").strip(),
-            posted_label=(job.get("postedOn") or "").strip(),  # relative, not a date
+            # Relative ("Posted 6 Days Ago"), not a date.
+            posted_label=(job.get("postedOn") or "").strip(),
+            job_id=source_id(f"workday:{self.tenant}", _requisition(job)),
         )
 
-    def answer(self, keywords: str, limit: int) -> str:
-        """The reply a tool returns: the roles, or which gap it hit."""
+    def answer(self, keywords: str, limit: int, config: RunnableConfig) -> str:
+        """The reply a tool returns: the roles, or which gap it hit.
+
+        Args:
+            keywords: As the tool was given them.
+            limit: As the tool was given it.
+            config: The tool's run config; see ``unsent.render_unsent``.
+        """
         postings = self.search(keywords, limit)
         if postings is None:
             return f"Couldn't reach {self.organization}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {self.organization} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
+            return (
+                f"No relevant {self.organization} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_unsent(
             f"*Latest {self.organization} AI/ML roles — {{count}} found:*",
             postings,
             footer=f"_{self.organization} publishes how long ago a role went up, not a date._",
+            config=config,
         )
 
 
@@ -145,13 +159,18 @@ def _req_id(job: dict, posting: JobPosting) -> str:
     the fallback, because a row Scout cannot identify must not silently collapse
     into another one.
     """
+    return _requisition(job) or posting.url or posting.title
+
+
+def _requisition(job: dict) -> str:
+    """The requisition id in ``bulletFields`` ("JR2024968"), or "" if there isn't one."""
     fields = job.get("bulletFields")
     if isinstance(fields, list) and fields and isinstance(fields[0], str):
         return fields[0]
-    return posting.url or posting.title
+    return ""
 
 
-# Tenant key -> its site. Adding a company is a line here. All verified live.
+#: Tenant key -> its site. Adding a company is a line here. All verified live.
 TENANTS: dict[str, WorkdayTenant] = {
     "nvidia": WorkdayTenant(
         organization="NVIDIA",
@@ -182,20 +201,26 @@ TENANTS: dict[str, WorkdayTenant] = {
 }
 
 
-#: This source's ``Searcher``, taking the tenant key first, matching the other
-#: multi-company platforms. See ``directory.py``.
-def search(
-    company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
-) -> list[JobPosting] | None:
-    """One tenant's US AI/ML openings, or None if it is unknown or unreachable."""
-    site = TENANTS.get((company or "").strip().lower())
+def search(company: str, keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:
+    """One tenant's US AI/ML openings, or None if it is unknown or unreachable.
+
+    This source's ``Searcher``, taking the tenant key first to match the other
+    multi-company platforms. See ``directory.py``.
+    """
+    site = _tenant_for(company)
     return None if site is None else site.search(keywords, limit)
+
+
+def _tenant_for(company: str) -> WorkdayTenant | None:
+    """The tenant for whatever the model passed as a company name, if Scout has it."""
+    return TENANTS.get((company or "").strip().lower())
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_workday_jobs(
-        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_workday_jobs(  # noqa: D417
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
     ) -> str:
         """Search a big-tech company's Workday careers site for US AI/ML job
         openings and return each role's title, location, and link.
@@ -209,10 +234,8 @@ def register(reg: ToolRegistry) -> None:
                 (machine learning / applied scientist / AI engineer / etc.).
             limit: Maximum number of roles to return.
         """
-        key = (company or "").strip().lower()
-        site = TENANTS.get(key)
+        site = _tenant_for(company)
         if site is None:
             supported = ", ".join(sorted(TENANTS))
-            return (f"Unknown company '{company}'. "
-                    f"Supported Workday companies: {supported}.")
-        return site.answer(keywords, limit)
+            return f"Unknown company '{company}'. Supported Workday companies: {supported}."
+        return site.answer(keywords, limit, config)

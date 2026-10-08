@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage
 
-from scout.agents import resume_parser
 from scout.agents.resume_parser import CandidateProfile, parse_profile
 from scout.agents.resume_tailored import ResumeTailoredAgent
 from scout.core.agent import ConversationalAgent
@@ -86,10 +85,9 @@ def test_empty_profile_still_renders_a_header() -> None:
 
 
 @pytest.fixture
-def pipeline(monkeypatch, chat_models, spec):
-    """A ResumeTailoredAgent over the scripted models, sharing one of them."""
-    monkeypatch.setattr(resume_parser.SPEC, "default_backend", "primary")
-    return ResumeTailoredAgent(spec), chat_models["primary"]
+def pipeline(chat_model, spec):
+    """A ResumeTailoredAgent over the scripted model, which both stages share."""
+    return ResumeTailoredAgent(spec), chat_model
 
 
 def test_pipeline_satisfies_the_adapter_interface(pipeline) -> None:
@@ -170,22 +168,6 @@ def test_the_job_stage_still_gets_its_full_tool_budget(pipeline, monkeypatch) ->
 
     assert agent.respond("U1", "find me jobs") == STUCK_REPLY
     assert len(model.seen) == 1 + 3  # the parse, then three job-stage calls
-
-
-def test_both_stages_switch_backend_together(monkeypatch, chat_models, spec) -> None:
-    """A mid-conversation switch must not leave the pipeline half on one model."""
-    monkeypatch.setattr(resume_parser.SPEC, "default_backend", "primary")
-    primary, other = chat_models["primary"], chat_models["fallback"]
-    agent = ResumeTailoredAgent(spec)
-
-    assert agent.set_backend("U1", "fallback") is True
-    assert agent.backend_label("U1") == "Scripted (fallback)"
-
-    other.replies = [AIMessage('{"titles": ["X"]}'), AIMessage("ok")]
-    agent.respond("U1", "jobs")
-
-    assert len(other.seen) == 2  # both the parse and the job turn went to "fallback"
-    assert primary.seen == []
 
 
 def test_the_brief_carries_every_field_the_parser_filled() -> None:

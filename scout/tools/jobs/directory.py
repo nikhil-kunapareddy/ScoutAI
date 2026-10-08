@@ -48,6 +48,10 @@ from .posting import Searcher
 WINDOW_DAYS = 30
 
 
+#: The platforms that host many companies behind one ``HostedBoard``.
+_HOSTED_BOARDS = (greenhouse.BOARD, ashby.BOARD, smartrecruiters.BOARD)
+
+
 class CompanySource(NamedTuple):
     """One company's careers board: what to call it, and how to search it."""
 
@@ -59,33 +63,22 @@ class CompanySource(NamedTuple):
 #: everyone they host, so a line in ``greenhouse.BOARDS``, ``ashby.BOARDS``,
 #: ``smartrecruiters.BOARDS`` or ``workday.TENANTS`` is also a line here.
 SOURCES: dict[str, CompanySource] = {
-    "amazon": CompanySource("Amazon", partial(amazon.search, days=WINDOW_DAYS)),
-    "google": CompanySource("Google", google.search),
-    "netflix": CompanySource("Netflix", netflix.search),
-    "lenovo": CompanySource("Lenovo", lenovo.search),
+    "amazon": CompanySource(amazon.ORGANIZATION, partial(amazon.search, days=WINDOW_DAYS)),
+    "google": CompanySource(google.ORGANIZATION, google.search),
+    "netflix": CompanySource(netflix.ORGANIZATION, netflix.search),
+    "lenovo": CompanySource(lenovo.ORGANIZATION, lenovo.search),
     "microsoft": CompanySource(microsoft.ORGANIZATION, microsoft.search),
     "apple": CompanySource(apple.ORGANIZATION, apple.search),
     "oracle": CompanySource(oracle.ORGANIZATION, oracle.search),
     "uber": CompanySource(uber.ORGANIZATION, uber.search),
     "cisco": CompanySource(cisco.ORGANIZATION, cisco.search),
     "bloomberg": CompanySource(bloomberg.ORGANIZATION, bloomberg.search),
-    "northeastern university": CompanySource(
-        northeastern.ORGANIZATION, northeastern.search
-    ),
-    "boston university": CompanySource(
-        boston_university.ORGANIZATION, boston_university.search
-    ),
+    "northeastern university": CompanySource(northeastern.ORGANIZATION, northeastern.search),
+    "boston university": CompanySource(boston_university.ORGANIZATION, boston_university.search),
     **{
-        slug: CompanySource(name, greenhouse.BOARD.searcher(slug))
-        for slug, name in greenhouse.BOARDS.items()
-    },
-    **{
-        slug: CompanySource(name, ashby.BOARD.searcher(slug))
-        for slug, name in ashby.BOARDS.items()
-    },
-    **{
-        slug: CompanySource(name, smartrecruiters.BOARD.searcher(slug))
-        for slug, name in smartrecruiters.BOARDS.items()
+        slug: CompanySource(name, board.searcher(slug))
+        for board in _HOSTED_BOARDS
+        for slug, name in board.boards.items()
     },
     **{
         slug: CompanySource(site.organization, site.searcher())

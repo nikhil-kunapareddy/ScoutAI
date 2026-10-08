@@ -32,17 +32,12 @@ def configured(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "ACTIVE_AGENT", "bigtech")
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
-    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
     # Pinned rather than inherited: a developer with a key in .env would
-    # otherwise exercise a different branch here than CI does. DEFAULT_BACKEND
-    # is derived from a key at import, so it needs pinning too — without it the
-    # "fallback differs from the default" line is reached only on a machine that
-    # has an Anthropic key, which is how it passed here and failed in CI.
-    monkeypatch.setattr(settings, "LLAMA_API_KEY", "")
-    monkeypatch.setattr(settings, "DEFAULT_BACKEND", "anthropic")
+    # otherwise exercise a different branch here than CI does.
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
+    monkeypatch.setattr(settings, "ANTHROPIC_MODEL", "claude-opus-5")
     monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "")
     monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "")
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "ollama")
     monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "U1")
     monkeypatch.setattr(settings, "CHECKPOINT_DB", "")
     return data
@@ -102,48 +97,33 @@ def test_no_resume_warns_rather_than_failing(configured, monkeypatch) -> None:
 
     assert report.ok
     assert levels(report)["resume"] == checks.WARN
+    # The remedy names the one file that would count.
+    assert "resume.pdf" in report.render()
     assert "untailored" in report.render()
 
 
-def test_no_anthropic_key_warns_about_the_local_model(configured, monkeypatch) -> None:
+def test_a_resume_under_another_name_does_not_count(configured) -> None:
+    """The parser reads resume.pdf and nothing else, so doctor has to agree."""
+    (configured / "resume.pdf").rename(configured / "sai_resume0807.pdf")
+
+    assert levels(checks.run())["resume"] == checks.WARN
+
+
+def test_no_anthropic_key_fails(configured, monkeypatch) -> None:
+    """Claude is the only model, so without a key no turn can be answered."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
 
     report = checks.run()
 
-    assert report.ok
-    assert levels(report)["models"] == checks.WARN
-    assert "local model" in report.render()
+    assert not report.ok
+    assert levels(report)["model"] == checks.FAIL
+    assert "ANTHROPIC_API_KEY" in report.render()
 
 
-def test_an_unknown_fallback_backend_warns(configured, monkeypatch) -> None:
-    """A typo here is invisible at runtime: the retry is simply skipped."""
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "ollamma")
+def test_the_model_line_names_the_model_in_use(configured) -> None:
+    detail = {c.label: c.detail for c in checks.run().checks}["model"]
 
-    report = checks.run()
-
-    assert levels(report)["fallback"] == checks.WARN
-    assert "ollamma" in report.render()
-
-
-def test_a_fallback_equal_to_the_default_is_called_a_no_op(configured, monkeypatch) -> None:
-    """With no hosted key the default *is* Ollama, and the retry buys nothing."""
-    monkeypatch.setattr(settings, "DEFAULT_BACKEND", "ollama")
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "ollama")
-
-    report = checks.run()
-
-    assert levels(report)["fallback"] == checks.OK
-    assert "no-op" in report.render()
-
-
-def test_an_empty_fallback_backend_is_a_deliberate_choice(configured, monkeypatch) -> None:
-    """The container sets it empty on purpose — that is not a warning."""
-    monkeypatch.setattr(settings, "FALLBACK_BACKEND", "")
-
-    report = checks.run()
-
-    assert levels(report)["fallback"] == checks.OK
-    assert "disabled" in report.render()
+    assert detail == "Claude (claude-opus-5)"
 
 
 def test_no_digest_recipient_warns(configured, monkeypatch) -> None:
@@ -194,6 +174,20 @@ def test_a_configured_checkpoint_db_is_reported_as_a_path(configured, monkeypatc
     assert "state/test.sqlite" in report.render()
 
 
+def test_the_shared_store_is_reported_as_a_path(configured, monkeypatch, tmp_path) -> None:
+    """Not created until the first digest sends something, which is not a fault."""
+    path = tmp_path / "shared.sqlite"
+    monkeypatch.setattr(settings, "SHARED_DB", str(path))
+
+    before = checks.run()
+    path.write_bytes(b"")
+    after = checks.run()
+
+    assert levels(before)["shared"] == checks.OK
+    assert f"{path} (not created yet)" in before.render()
+    assert f"{path} (exists)" in after.render()
+
+
 def test_the_report_asks_nothing_of_the_network(configured, monkeypatch) -> None:
     """The point of doctor: it describes this checkout, not the internet.
 
@@ -209,16 +203,6 @@ def test_the_report_asks_nothing_of_the_network(configured, monkeypatch) -> None
     monkeypatch.setattr(requests, "post", explode)
 
     assert checks.run().ok
-
-
-def test_a_configured_llama_key_is_listed_as_available(configured, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "LLAMA_API_KEY", "llx-x")
-
-    detail = {c.label: c.detail for c in checks.run().checks}["models"]
-
-    assert "llama (" in detail
-    assert "anthropic (" in detail
-    assert "ollama (" in detail
 
 
 # --- Langfuse -------------------------------------------------------------

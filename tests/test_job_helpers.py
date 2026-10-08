@@ -10,6 +10,7 @@ from scout.tools.jobs.posting import (
     JobPosting,
     clamp_int,
     render_postings,
+    source_id,
     take_newest,
 )
 from scout.tools.jobs.relevance import (
@@ -22,19 +23,27 @@ from scout.tools.jobs.relevance import (
 
 @pytest.mark.parametrize("title", [
     "Machine Learning Engineer",
-    "Applied Scientist II",
-    "Senior Research Engineer, Personalization",
+    "Applied Artificial Intelligence Engineer",
+    "Data Analyst II",
+    "Staffing Data Analyst",          # "staff" is excluded as a whole word only
+    "Financial Analyst",              # "analyst" on its own counts, in any field
     "Software Engineer, AI",          # standalone token
     "LLM Infrastructure Engineer",
     "Data Scientist, Ads",
-    "GenAI Solutions Architect",
+    "Backend Software Engineer",
+    "Software Engineer II",
 ])
 def test_ai_ml_titles(title: str) -> None:
     assert is_ai_ml_role(title)
 
 
 @pytest.mark.parametrize("title", [
-    "Financial Analyst",
+    "Applied Scientist II",           # not on the phrase list
+    "Senior Research Engineer, Personalization",
+    "Senior Machine Learning Engineer",   # excluded even though it matches a phrase
+    "Staff Software Engineer",
+    "Member of Technical Staff, Inference",
+    "GenAI Solutions Architect",      # "genai" is one word, so not the "ai" token
     "Supply Chain Manager",
     "Technical Program Manager",
     "Retail Sales Associate",
@@ -121,3 +130,27 @@ def test_render_postings_without_footer() -> None:
     out = render_postings("*H — {count}:*", [JobPosting("T", "Org", "u")])
     assert "_note_" not in out
     assert "*H — 1:*" in out
+
+
+def test_a_posting_is_known_by_its_source_id_first() -> None:
+    assert JobPosting("T", "Org", "https://u", job_id="amazon:1").key == "amazon:1"
+
+
+def test_a_posting_without_an_id_is_known_by_its_link() -> None:
+    assert JobPosting("T", "Org", "https://u").key == "url:https://u"
+
+
+def test_a_posting_with_neither_has_no_key() -> None:
+    """Nothing stable to match tomorrow, so it is never hidden or recorded."""
+    assert JobPosting("T", "Org", "").key is None
+
+
+@pytest.mark.parametrize(("native", "expected"), [
+    ("2876543", "amazon:2876543"),
+    (2876543, "amazon:2876543"),
+    ("  JR1 ", "amazon:JR1"),
+    ("", ""),
+    (None, ""),
+])
+def test_source_id_namespaces_the_id_or_gives_nothing(native: object, expected: str) -> None:
+    assert source_id("amazon", native) == expected

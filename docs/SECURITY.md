@@ -28,6 +28,7 @@ things it touches:
 | Your résumé | `data/`, and the parsed profile in the checkpoint database | git-ignored; `data/` is baked into the image only if you choose to build it that way |
 | Conversation history | in memory, or SQLite at `CHECKPOINT_DB` | local to the host; `--reset` deletes a thread |
 | Your referral list | `state/referrals.json` | local to the host; excluded from `deploy.sh`'s rsync |
+| Jobs each digest sent you | `state/shared.sqlite` | local to the host; excluded from `deploy.sh`'s rsync |
 
 Design choices that follow from that:
 

@@ -52,26 +52,12 @@ def get_json(url: str, params: Params | None = None) -> object | None:
     also where the judgement lives: for Oracle a *missing* key means the request
     was built wrong and the answer is "unreachable", not "nothing open".
     """
-    response = _get(url, params, _JSON_ACCEPT)
-    if response is None:
-        return None
-    try:
-        body: object = response.json()
-    except Exception:
-        return None
-    return body
+    return _decode(_get(url, params, _JSON_ACCEPT))
 
 
 def post_json(url: str, payload: Params) -> object | None:
     """As ``get_json``, for an endpoint that takes its query in the body."""
-    response = _post(url, payload)
-    if response is None:
-        return None
-    try:
-        body: object = response.json()
-    except Exception:
-        return None
-    return body
+    return _decode(_post(url, payload))
 
 
 def json_rows(payload: object, key: str) -> list[dict]:
@@ -90,13 +76,13 @@ def json_rows(payload: object, key: str) -> list[dict]:
     return [row for row in found if isinstance(row, dict)]
 
 
-def _get(url: str, params: Params | None, accept: Params | None = None) -> Response | None:
+def _get(url: str, params: Params | None, extra_headers: Params | None = None) -> Response | None:
     """One GET, or None if the source could not be reached."""
     try:
         response = requests.get(
             url,
             params=params,
-            headers={"User-Agent": settings.TOOL_USER_AGENT, **(accept or {})},
+            headers={"User-Agent": settings.TOOL_USER_AGENT, **(extra_headers or {})},
             timeout=settings.TOOL_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -122,6 +108,17 @@ def _post(url: str, payload: Params) -> Response | None:
         return response
     except Exception:
         return None
+
+
+def _decode(response: Response | None) -> object | None:
+    """The response's decoded JSON body, or None if it never arrived or isn't JSON."""
+    if response is None:
+        return None
+    try:
+        body: object = response.json()
+    except Exception:
+        return None
+    return body
 
 
 def _rows(response: Response | None, key: str) -> list[dict] | None:

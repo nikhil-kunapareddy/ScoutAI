@@ -3,23 +3,26 @@
     systemd timer ──▶ python -m scout.digest ──▶ one agent ──▶ one DM
     (scout-digest@<key>)   (AGENT=<key>)                     (that bot's app)
 
-One process per agent, which is the same rule ``scout run`` follows and the
-reason each report lands in its own conversation: the Slack token comes from
-``.env.<agent>``, so the BigTech app posts the BigTech digest and the Referral
-Window posts its own. A single process could only ever hold one bot's token,
-which is why the three used to arrive stacked in one window.
+One process per agent, the same rule ``scout run`` follows: the Slack token
+comes from ``.env.<agent>``, so the BigTech app posts the BigTech digest and the
+Referral Window posts its own. A process can only hold one bot's token, which is
+why reports are never merged into one message.
 
 Which agents *have* a digest is derived, not listed: any spec with ``in_digest``
 is one, so a new job agent gets a morning report by existing. What it takes to
 deliver that report is a timer instance — see ``deploy/scout-digest@.service``.
 
 Each agent runs on its own thread (``digest:<key>``), kept apart from the
-threads the Slack bot uses. Two things follow from that. The digest never
-consumes the chat history's ``MAX_TURNS`` window — you can ask the bot something
-right after a digest and it has no idea one happened. And because the thread
-persists (given ``CHECKPOINT_DB``), each agent can see what it reported on
-previous days and skip repeats, which is the only dedupe available here: agents
-return prose, not the structured ``JobPosting`` objects their tools built.
+threads the Slack bot uses, so the digest never consumes the chat history's
+``MAX_TURNS`` window — you can ask the bot something right after a digest and it
+has no idea one happened.
+
+What a digest already sent is not in that thread; it is in ``shared_jobs``. Every
+job tool hides what this agent sent within ``DIGEST_DEDUPE_DAYS`` before the
+model sees it (``tools/jobs/unsent.py``), and once the DM is posted, the postings
+whose links it carries are recorded. So the thread holds nothing tomorrow needs,
+and it is reset at the start of every run: no history to outgrow the window, and
+a changed résumé is parsed again the next morning rather than never.
 """
 
 from __future__ import annotations
@@ -27,39 +30,36 @@ from __future__ import annotations
 from datetime import date
 
 from .agents import AGENTS, build_agent
-from .core import settings, tracing
+from .core import settings, shared_jobs, tracing
 from .core.agent import AgentSpec
 from .core.logging_config import configure_logging, logger
+from .core.referrals import DIGEST_THREAD_PREFIX
 from .slack.notify import post_dm
+from .tools.jobs import unsent
 
 log = logger()
 
-#: One thread per agent, never a real Slack user id, so it cannot collide with
-#: one. Kept stable across runs so the cached profile and the record of what was
-#: already reported both survive.
-DIGEST_THREAD = "digest:{key}"
+#: The date in each report's header, e.g. ``Tue 06 Oct 2026``.
+_HEADER_DATE_FORMAT = "%a %d %b %Y"
 
-#: What the agent is asked. Deliberately does the ranking inside the agent that
-#: did the searching: a separate merge-and-rank pass would be another model call
-#: per day for a list the agent could already order itself.
+#: What the agent is asked. The ranking happens inside the agent that did the
+#: searching: a separate merge-and-rank pass would be another model call per day
+#: for a list the agent can already order itself.
 #:
-#: Worded for every agent that has a digest, not just the resume-tailored ones.
-#: "everything you cover" is every source for a job agent and the whole referral
-#: list for the Referral Window, and the line about what could not be checked is
-#: what keeps that agent's completeness claim intact in a digest.
+#: Worded for every agent with a digest. "Everything you cover" is every source
+#: for a job agent and the whole referral list for the Referral Window, and the
+#: closing line about what could not be checked keeps that agent's completeness
+#: claim intact.
 #:
-#: The layout is pinned here rather than rendered in code because what comes
-#: back from an agent is prose — the structured ``JobPosting`` objects its tools
-#: built are gone by the time the reply exists, which is the same reason the
-#: thread is the only dedupe. Asking for the shape is the cheap half of that
-#: trade: a report that reads the same tomorrow, and the same on Ollama as on
-#: Claude. What it cannot enforce, ``render_postings`` already did — the fields
-#: the model is reformatting were identical across every source to begin with.
+#: The layout is pinned here rather than rendered in code because the reply is
+#: prose — the ``JobPosting`` objects are gone by the time it exists. The fields
+#: the model reformats were already identical across sources (``render_postings``),
+#: so asking for the shape is enough to make every day's report read the same.
 DIGEST_REQUEST = (
     "Daily job digest. Search everything you cover and report what is open, "
     "best first — at most {max_roles} roles. Prefer roles posted in the last "
-    "few days, and leave out anything you already reported earlier in this "
-    "conversation.\n"
+    "few days. Roles an earlier digest sent are already left out of what your "
+    "tools return.\n"
     "\n"
     "Format every role exactly like this, and put nothing else between them:\n"
     "\n"
@@ -94,38 +94,88 @@ def run_digest(spec: AgentSpec) -> str:
     A failure is reported rather than raised, so the morning DM still arrives
     and says what went wrong. ``OnFailure=`` on the unit stays the backstop for
     anything that breaks before this point, such as missing configuration.
-    """
-    log.info("Digest: running %s", spec.key)
-    try:
-        reply = build_agent(spec).respond(
-            DIGEST_THREAD.format(key=spec.key),
-            DIGEST_REQUEST.format(max_roles=settings.DIGEST_MAX_ROLES),
-        )
-    except Exception as e:
-        log.exception("Digest: %s failed", spec.key)
-        reply = f":warning: failed — `{e.__class__.__name__}: {e}`"
 
-    return f"*{spec.name} — {date.today():%a %d %b %Y}*\n{reply}"
+    Args:
+        spec: The agent whose digest to run.
+    """
+    return f"{_header(spec)}\n{_request_report(spec)}"
 
 
 def main() -> None:
+    """Run the active agent's digest and DM it to ``DIGEST_SLACK_USER``."""
     configure_logging()
     settings.require_digest_config()
+    spec = _active_digest_spec()
 
+    try:
+        message = run_digest(spec)
+        post_dm(settings.DIGEST_SLACK_USER, message)
+        _remember_sent(spec, message)
+    finally:
+        # Export is batched on a background thread and this process is about to
+        # exit, which is when Langfuse asks a short-lived app to shut down. Doing
+        # it here also keeps any export complaint inside this run's journal.
+        tracing.shutdown()
+
+
+def _active_digest_spec() -> AgentSpec:
+    """The spec this process runs, or exit naming the agents that have a digest."""
     spec = AGENTS.get(settings.ACTIVE_AGENT)
-    if spec is None or not spec.in_digest:
-        have = ", ".join(sorted(s.key for s in digest_agents()))
-        raise SystemExit(
-            f"Agent {settings.ACTIVE_AGENT!r} has no digest. Digest agents: {have}. "
-            "Pick one with `scout digest --agent KEY`, or set in_digest on its spec."
-        )
+    if spec is not None and spec.in_digest:
+        return spec
 
-    post_dm(settings.DIGEST_SLACK_USER, run_digest(spec))
-    # Traces are exported in batches on a background thread, and this process is
-    # about to exit — which is the case Langfuse asks a short-lived application
-    # to shut down for, rather than leave to the interpreter. It also puts any
-    # complaint about sending them inside this run's own journal window.
-    tracing.shutdown()
+    available = ", ".join(sorted(candidate.key for candidate in digest_agents()))
+    raise SystemExit(
+        f"Agent {settings.ACTIVE_AGENT!r} has no digest. Digest agents: {available}. "
+        "Pick one with `scout digest --agent KEY`, or set in_digest on its spec."
+    )
+
+
+def _request_report(spec: AgentSpec) -> str:
+    """The agent's report, or a one-line failure note in its place."""
+    log.info("Digest: running %s", spec.key)
+    request = DIGEST_REQUEST.format(max_roles=settings.DIGEST_MAX_ROLES)
+    thread = _thread_id(spec)
+    try:
+        agent = build_agent(spec)
+        # Yesterday's turn holds nothing today needs: what was sent is in
+        # shared_jobs. Starting clean also re-reads the résumé.
+        agent.reset(thread)
+        return agent.respond(thread, request)
+    except Exception as exc:
+        log.exception("Digest: %s failed", spec.key)
+        return f":warning: failed — `{type(exc).__name__}: {exc}`"
+
+
+def _thread_id(spec: AgentSpec) -> str:
+    """The checkpointer thread a digest runs on, e.g. ``digest:bigtech``.
+
+    Never a Slack user id, so it cannot collide with a conversation, and stable
+    across runs, so each morning's reset clears yesterday's thread rather than
+    leaving one behind per day. The prefix is the one ``referrals.owner_for`` and
+    ``unsent.render_unsent`` match to recognise a digest turn.
+    """
+    return f"{DIGEST_THREAD_PREFIX}{spec.key}"
+
+
+def _remember_sent(spec: AgentSpec, message: str) -> None:
+    """Record the postings the DM carried, so the next digest skips them.
+
+    Called after the post, never before: a DM that failed to send sent nothing.
+    A store that can't be written costs tomorrow a repeat, not today's digest.
+    """
+    sent = unsent.take_sent(_thread_id(spec), message)
+    try:
+        kept = shared_jobs.record(spec.key, sent)
+    except shared_jobs.SharedJobsError:
+        log.exception("Digest: couldn't record what %s sent", spec.key)
+        return
+    log.info("Digest: recorded %d posting(s) sent by %s", kept, spec.key)
+
+
+def _header(spec: AgentSpec) -> str:
+    """The report's first line: the agent's name and today's date, in bold."""
+    return f"*{spec.name} — {date.today().strftime(_HEADER_DATE_FORMAT)}*"
 
 
 if __name__ == "__main__":

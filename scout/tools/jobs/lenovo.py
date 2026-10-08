@@ -19,6 +19,8 @@ import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import feeds, fetch
 from .posting import (
@@ -28,10 +30,11 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 FEED_URL = "https://jobs.lenovo.com/en_US/careers/SearchJobs/feed/"
 ORGANIZATION = "Lenovo"
@@ -51,7 +54,10 @@ _JOB_ID_RE = re.compile(r"/JobDetail/[^/]+/(\d+)")
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_lenovo_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_lenovo_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Lenovo's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -65,11 +71,14 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or widen your keywords.")
-        return render_postings(
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or widen your keywords."
+            )
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -97,6 +106,7 @@ def _postings_for(query: str) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, pinned to US roles."""
     return {
         **US_FACET,
         "listFilterMode": 1,
@@ -116,12 +126,15 @@ def _to_posting(item: str) -> JobPosting | None:
     if not is_ai_ml_role(title):
         return None
     raw_date = feeds.tag_text(item, "pubDate")
+    url = feeds.tag_text(item, "link")
     return JobPosting(
         title=title,
         organization=ORGANIZATION,
-        url=feeds.tag_text(item, "link"),
+        url=url,
         date=_parse_pub_date(raw_date),
-        posted_label=raw_date,  # shown verbatim when the date won't parse
+        # Shown verbatim when the date won't parse.
+        posted_label=raw_date,
+        job_id=source_id("lenovo", _job_id(url)),
     )
 
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import feeds, fetch
 from .posting import (
@@ -15,10 +17,10 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
     take_newest,
 )
-from .relevance import is_ai_ml_role, matches_keywords
+from .relevance import is_ai_ml_role, is_excluded, matches_keywords
+from .unsent import render_unsent
 
 FEED_URL = "https://jobs.silkroad.com/BU/External/rss"
 ORGANIZATION = "Boston University"
@@ -26,8 +28,9 @@ ORGANIZATION = "Boston University"
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_boston_university_jobs(
-        keywords: str = "", limit: int = DEFAULT_LIMIT
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_boston_university_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
     ) -> str:
         """Search Boston University's careers site for recent job openings and
         return each role's title, location, date posted, and link.
@@ -43,10 +46,14 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers feed right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
-            f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*", postings
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_unsent(
+            f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 
@@ -64,9 +71,7 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
 
     terms = keywords.lower().split()
     postings = [
-        posting
-        for item in feeds.items(feed)
-        if (posting := _to_posting(item, terms)) is not None
+        posting for item in feeds.items(feed) if (posting := _to_posting(item, terms)) is not None
     ]
     return take_newest(postings, limit)
 
@@ -84,7 +89,8 @@ def _to_posting(item: str, terms: list[str]) -> JobPosting | None:
         url=feeds.tag_text(item, "link"),
         location=feeds.tag_text(item, "location"),
         date=_parse_posted_date(raw_date),
-        posted_label=raw_date,  # shown verbatim when the date won't parse
+        # Shown verbatim when the date won't parse.
+        posted_label=raw_date,
     )
 
 
@@ -92,9 +98,12 @@ def _is_wanted(title: str, terms: list[str]) -> bool:
     """Explicit keywords win; otherwise fall back to the AI/ML filter.
 
     The feed has no server-side search, so one of the two always applies — asking
-    BU for "custodian" should find one, without the AI/ML filter dropping it.
+    BU for "custodian" should find one, without the AI/ML filter dropping it. The
+    exclusions apply either way.
     """
-    return matches_keywords(title, terms) if terms else is_ai_ml_role(title)
+    if terms:
+        return matches_keywords(title, terms) and not is_excluded(title)
+    return is_ai_ml_role(title)
 
 
 def _parse_posted_date(raw: str) -> datetime | None:

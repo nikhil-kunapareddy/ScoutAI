@@ -46,20 +46,25 @@ def configure_logging() -> logging.Logger:
 
     Rotation matters in production: without it ``bot.log`` grows forever.
     """
+    # Make sure logs/ exists before writing to it.
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Write to logs/bot.log. Once it reaches LOG_MAX_BYTES it is renamed to
+    # bot.log.1 and a new file starts; only LOG_BACKUP_COUNT old files are kept.
     file_handler = RotatingFileHandler(
         LOG_DIR / "bot.log",
         maxBytes=settings.LOG_MAX_BYTES,
         backupCount=settings.LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
+    # Send every log line to both the console and that file, in one format.
     logging.basicConfig(
         level=settings.LOG_LEVEL,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         handlers=[logging.StreamHandler(), file_handler],
         force=True,  # replace any handlers a library installed first
     )
+    # Hide routine chatter from libraries such as httpx and anthropic.
     quiet_third_party_loggers()
 
     return logger()

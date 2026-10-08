@@ -7,7 +7,6 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from scout.agents import resume_parser
 from scout.agents.resume_tailored import ResumeTailoredAgent
 from scout.core import settings
 from scout.core.checkpoints import build_checkpointer
@@ -42,34 +41,34 @@ def test_absolute_path_is_left_alone(tmp_path) -> None:
     assert under_root(str(tmp_path / "s.sqlite")) == tmp_path / "s.sqlite"
 
 
-def test_history_survives_a_restart(spec, chat_models, persisted) -> None:
-    chat_models["primary"].replies = [AIMessage("noted"), AIMessage("blue")]
+def test_history_survives_a_restart(spec, chat_model, persisted) -> None:
+    chat_model.replies = [AIMessage("noted"), AIMessage("blue")]
     Agent(spec).respond("U1", "remember: blue")
 
     # A restart is a fresh Agent over the same database.
     Agent(spec).respond("U1", "what colour?")
 
-    sent = chat_models["primary"].seen[-1]
+    sent = chat_model.seen[-1]
     assert [m.text for m in sent if m.type == "human"] == [
         "remember: blue",
         "what colour?",
     ]
 
 
-def test_reset_clears_the_persisted_thread(spec, chat_models, persisted) -> None:
-    chat_models["primary"].replies = [AIMessage("noted"), AIMessage("fresh")]
+def test_reset_clears_the_persisted_thread(spec, chat_model, persisted) -> None:
+    chat_model.replies = [AIMessage("noted"), AIMessage("fresh")]
     agent = Agent(spec)
     agent.respond("U1", "remember: blue")
     agent.reset("U1")
 
     Agent(spec).respond("U1", "what colour?")
 
-    sent = chat_models["primary"].seen[-1]
+    sent = chat_model.seen[-1]
     assert [m.text for m in sent if m.type == "human"] == ["what colour?"]
 
 
-def test_one_users_reset_leaves_another_alone(spec, chat_models, persisted) -> None:
-    chat_models["primary"].replies = [AIMessage("a"), AIMessage("b"), AIMessage("c")]
+def test_one_users_reset_leaves_another_alone(spec, chat_model, persisted) -> None:
+    chat_model.replies = [AIMessage("a"), AIMessage("b"), AIMessage("c")]
     agent = Agent(spec)
     agent.respond("U1", "mine")
     agent.respond("U2", "theirs")
@@ -77,16 +76,13 @@ def test_one_users_reset_leaves_another_alone(spec, chat_models, persisted) -> N
 
     agent.respond("U2", "still there?")
 
-    sent = chat_models["primary"].seen[-1]
+    sent = chat_model.seen[-1]
     assert [m.text for m in sent if m.type == "human"] == ["theirs", "still there?"]
 
 
-def test_parsed_profile_survives_a_restart(
-    monkeypatch, spec, chat_models, persisted
-) -> None:
+def test_parsed_profile_survives_a_restart(spec, chat_model, persisted) -> None:
     """The point of persisting: no re-parse, so no extra model call per restart."""
-    monkeypatch.setattr(resume_parser.SPEC, "default_backend", "primary")
-    model = chat_models["primary"]
+    model = chat_model
     model.replies = [
         AIMessage('{"titles": ["ML Engineer"]}'),  # parser stage
         AIMessage("here are some roles"),          # job stage

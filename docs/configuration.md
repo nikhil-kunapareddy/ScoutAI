@@ -48,36 +48,19 @@ every DM.
 One process per agent. The digest runs them all in-process and needs no second
 app.
 
-## Models
+## Model
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Enables the Claude backend, and makes it the default. |
-| `ANTHROPIC_MODEL` | `claude-opus-5` | Any Claude model id. |
+| `ANTHROPIC_API_KEY` | — | **Required.** Claude is the only model every agent runs on; without a key every turn fails, and `scout doctor` says so. |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5` | Any Claude model id. Haiku 4.5 is the cheapest. |
 | `ANTHROPIC_MAX_TOKENS` | `16000` | Per-reply ceiling. |
-| `ANTHROPIC_EFFORT` | `medium` | Thinking depth: `low`, `medium`, `high`, `xhigh`, `max`. Trades latency for depth; `medium` keeps a multi-hop tool loop snappy in Slack. |
-| `OLLAMA_HOST` | `http://localhost:11434` | Where the local model server listens. |
-| `OLLAMA_MODEL` | `llama3.2:3b` | Pull it first: `ollama pull llama3.2:3b`. |
-| `LLAMA_API_KEY` | — | Enables the Meta Llama API backend (`--api`). |
-| `LLAMA_MODEL` | `Llama-4-Maverick-17B-128E-Instruct-FP8` | |
-| `LLAMA_BASE_URL` | `https://api.llama.com/compat/v1` | Meta's OpenAI-compatible *base* URL, not the `/chat/completions` path. |
-| `MODEL_REQUEST_TIMEOUT_SECONDS` | `300` | Generous, because generation on a local model can take minutes. |
+| `ANTHROPIC_EFFORT` | empty | Thinking depth: `low`, `medium`, `high`, `xhigh`, `max`. Empty sends none, which Haiku 4.5 requires — it rejects the option. Set it for an Opus or Sonnet model; `medium` keeps a multi-hop tool loop snappy in Slack. |
+| `MODEL_REQUEST_TIMEOUT_SECONDS` | `300` | Generous, because a long reply at a high effort can take minutes. |
 
-Users switch backends per conversation with `--claude`, `--ollama`, and
-`--api`; the choice lasts until they change it or the process restarts.
-
-## Backend selection and fallback
-
-| Variable | Default | Notes |
-|---|---|---|
-| `FALLBACK_BACKEND` | `ollama` | Where a failed model call is retried, once, inside the same turn. Empty disables the retry. |
-
-The default backend is not configured directly: it is Claude when
-`ANTHROPIC_API_KEY` is set, and Ollama otherwise. With no key there is nothing
-to fall back *from*, so the retry becomes a no-op.
-
-**Set `FALLBACK_BACKEND=` (empty) in a container.** There is no Ollama in the
-image, so leaving it on makes every Claude failure fail twice.
+There is no fallback model. `ChatAnthropic` retries transient API errors on its
+own; a call that still fails ends the turn with the error in the reply, and the
+user's next message starts clean.
 
 ## Conversation
 
@@ -98,24 +81,27 @@ conversations into a single history. The digest is already safe: it uses
 `digest:<key>` threads.
 
 With `CHECKPOINT_DB` set, a changed résumé needs a `--reset` to take effect —
-the cached profile outlives the process too.
+the cached profile outlives the process too. The digest resets its own thread at
+the start of every run, so it picks up a new résumé the next morning.
 
-## Résumé and referrals
+## Résumé, referrals and the shared store
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RESUME_DIR` | `data` | Where the Resume Parser looks. Relative to the project root, so a clone needs nothing here; set it if you installed the package instead of cloning. |
+| `RESUME_DIR` | `data` | The folder holding `resume.pdf`, the one file the Resume Parser reads. Relative to the project root, so a clone needs nothing here; set it if you installed the package instead of cloning. |
 | `REFERRALS_FILE` | `state/referrals.json` | The referral list. Unlike `CHECKPOINT_DB` this has a real default: history is disposable, a list you typed by hand is not. |
+| `SHARED_DB` | `state/shared.sqlite` | One SQLite file every agent's process shares. Today it holds the jobs each digest has sent, so the next one can skip them. A real default, for the referral list's reason. |
 
 `state/` is excluded from `deploy.sh`'s rsync, so a redeploy cannot overwrite
-the box's list with a laptop's.
+the box's list or shared store with a laptop's.
 
 ## Daily digest
 
 | Variable | Default | Notes |
 |---|---|---|
 | `DIGEST_SLACK_USER` | — | Your Slack member id (profile → **Copy member ID**) — yours, not the bot's. Required by `scout digest`. |
-| `DIGEST_MAX_ROLES` | `5` | Roles asked of each agent, so the message holds this many *per section*. |
+| `DIGEST_MAX_ROLES` | `25` | Roles asked of each agent, so the message holds this many *per section*. |
+| `DIGEST_DEDUPE_DAYS` | `30` | Days a job stays out of an agent's digest after that digest sent it. Most postings stay open a month or more, so a week would bring the same role back every week. |
 
 `DIGEST_SLACK_USER` does double duty: digest threads are not people, so it is
 also the owner whose referral list a digest turn reads.
@@ -135,7 +121,7 @@ hard-coded number is worse than none. See [operations](operations.md).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LOG_LEVEL` | `INFO` | `DEBUG` also un-mutes slack-bolt, urllib3, and the provider SDKs. |
+| `LOG_LEVEL` | `INFO` | `DEBUG` also un-mutes slack-bolt, urllib3, and the Anthropic SDK. |
 | `LOG_MAX_BYTES` | `5242880` | `logs/bot.log` rotates at 5 MB. |
 | `LOG_BACKUP_COUNT` | `3` | Rotated files kept. |
 
@@ -166,7 +152,7 @@ system prompt** — `LANGFUSE_HIDE_CONTENT` is the answer to that. See
 
 ## What is not configured here
 
-An agent's system prompt, its tool set, and its default backend live on its
+An agent's system prompt and its tool set live on its
 `AgentSpec` in `scout/agents/` — they are code, not environment. Adding a
 setting means adding it to `settings.py` and to `.env.example`; scattered
 `os.environ` reads are what that file exists to prevent.

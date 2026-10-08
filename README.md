@@ -38,8 +38,6 @@ Scout  ▸ Three worth a look, ranked against your résumé:
   aggregator.
 - **Shows up on its own.** Each agent runs a daily digest and DMs its own
   briefing each morning, in its own Slack window.
-- **Swap models mid-conversation.** `--claude`, `--ollama`, `--llama`. History
-  is provider-agnostic, so the thread survives the switch.
 
 ## What ships with it
 
@@ -70,7 +68,7 @@ Creating the Slack app takes about five minutes and is the only fiddly part.
 ## How it works
 
 <div align="center">
-  <img src="assets/sys.png" alt="Scout system architecture: a Slack DM enters through the SlackBot adapter and the ConversationalAgent seam into the LangGraph agent graphs, which call the model backends and the tool registry, with conversation state, the scheduled digest, and the EC2 deployment around them" width="100%">
+  <img src="assets/sys.png" alt="Scout system architecture: a Slack DM enters through the SlackBot adapter and the ConversationalAgent seam into the LangGraph agent graphs, which call Claude and the tool registry, with conversation state, the scheduled digest, and the EC2 deployment around them" width="100%">
 </div>
 
 A Slack DM enters through a Socket Mode adapter that knows nothing about agents.

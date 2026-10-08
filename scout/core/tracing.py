@@ -57,7 +57,7 @@ REDACTED = "[redacted by LANGFUSE_HIDE_CONTENT]"
 #: Trace names, by what asked for the turn. Verb-first and free of anything
 #: per-run: Langfuse dashboards, saved views and judges target names, so a name
 #: that carries a user id or a model would fragment every one of them. Which
-#: agent ran, and on which backend, are a tag and a metadata field instead.
+#: agent ran is a tag instead, and the model is on each generation.
 SLACK_TRACE = "answer-slack-dm"
 DIGEST_TRACE = "run-job-digest"
 
@@ -175,10 +175,6 @@ def traced(
             session_id=thread,
             user_id=thread,
             tags=[agent, DIGEST_SOURCE if digest else SLACK_SOURCE],
-            # Request context, for the question a generation cannot answer on
-            # its own: which backend the turn was *asked* for. It differs from
-            # the model that replied exactly when the fallback rescued the turn.
-            metadata={"scout_backend": config["configurable"].get("backend") or ""},
         ),
     ):
         # A new dict rather than a mutated one: the caller keeps an untraced
@@ -198,8 +194,11 @@ def shutdown() -> None:
     if _handler is None:
         return  # nothing was traced, so there is nothing queued
     try:
+        # Imported inside the try, so even a broken Langfuse install is only
+        # logged and cannot fail a digest that was already sent.
         from langfuse import get_client
 
+        # Send the queued traces, then stop the background sender.
         get_client().shutdown()
     except Exception:
         log.exception("Could not shut Langfuse down cleanly")

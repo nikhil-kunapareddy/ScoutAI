@@ -25,7 +25,7 @@ GREENHOUSE_JOBS = {
     "jobs": [
         {"title": "Machine Learning Engineer", "absolute_url": "https://gh/1",
          "location": {"name": "San Francisco, CA"}, "first_published": "2026-08-20T10:00:00-04:00"},
-        {"title": "Applied Scientist", "absolute_url": "https://gh/2",
+        {"title": "Data Analyst", "absolute_url": "https://gh/2",
          "location": {"name": "Bengaluru, India"}, "first_published": "2026-08-21T10:00:00-04:00"},
         {"title": "Office Manager", "absolute_url": "https://gh/3",
          "location": {"name": "Remote"}, "first_published": "2026-08-22T10:00:00-04:00"},
@@ -43,7 +43,7 @@ def test_greenhouse_filters_by_relevance_and_location(monkeypatch) -> None:
     assert "Latest Databricks AI/ML roles" in out
     assert "Machine Learning Engineer" in out
     assert "Data Scientist, Growth" in out
-    assert "Applied Scientist" not in out   # India
+    assert "Data Analyst" not in out   # India
     assert "Office Manager" not in out      # not AI/ML
     assert "Posted: Aug 20, 2026" in out
     assert "Posted: not listed" in out      # unparseable date
@@ -102,7 +102,7 @@ def test_greenhouse_location_heuristic(location: str, is_us: bool) -> None:
 
 ASHBY_JOBS = {
     "jobs": [
-        {"title": "Senior Machine Learning Engineer", "jobUrl": "https://ashby/1",
+        {"title": "Lead Machine Learning Engineer", "jobUrl": "https://ashby/1",
          "location": "Boston, MA", "publishedAt": "2026-07-15T10:00:00.500+00:00",
          "isListed": True,
          "address": {"postalAddress": {"addressCountry": "United States"}}},
@@ -129,7 +129,7 @@ def test_ashby_filters_by_relevance_listing_and_country(monkeypatch) -> None:
     out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch, company="whoop")
 
     assert "Latest WHOOP AI/ML roles" in out
-    assert "Senior Machine Learning Engineer" in out
+    assert "Lead Machine Learning Engineer" in out
     assert "Data Scientist, Growth" not in out   # India
     assert "Physical Therapist" not in out       # not AI/ML
     assert "ML Engineer, Perception" not in out  # pulled from the board
@@ -149,7 +149,7 @@ def test_ashby_narrows_by_keyword(monkeypatch) -> None:
     out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch,
                     company="whoop", keywords="research")
     assert "AI Research Engineer" in out
-    assert "Senior Machine Learning Engineer" not in out
+    assert "Lead Machine Learning Engineer" not in out
 
 
 def test_ashby_lists_supported_companies_for_an_unknown_one(monkeypatch) -> None:
@@ -280,7 +280,7 @@ WORKDAY_JOBS = {
          "locationsText": "2 Locations", "postedOn": "Posted Today",
          "bulletFields": ["JR2"]},
         # No requisition id: de-duping falls back to the URL.
-        {"title": "Applied Scientist", "externalPath": "/job/US-CA/AS_JR3",
+        {"title": "Data Analyst", "externalPath": "/job/US-CA/AS_JR3",
          "locationsText": "2 Locations", "postedOn": "", "bulletFields": []},
     ]
 }
@@ -293,7 +293,7 @@ def test_workday_filters_by_relevance_and_reports_no_date(monkeypatch) -> None:
 
     assert "Latest NVIDIA AI/ML roles" in out
     assert "Machine Learning Engineer" in out
-    assert "Applied Scientist" in out
+    assert "Data Analyst" in out
     assert "Office Manager" not in out  # not AI/ML
     # Workday's own wording is repeated, never turned into a date.
     assert "Posted: Posted 6 Days Ago" in out

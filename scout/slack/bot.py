@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from ..core import settings
+from ..core import models, settings
 from ..core.agent import ConversationalAgent
 from ..core.logging_config import logger, quiet_third_party_loggers
 from .formatting import split_message
@@ -68,43 +68,13 @@ class SlackBot:
     def _build_commands(self) -> list[Command]:
         """The command table, in the order ``--help`` lists them."""
         return [
-            Command(("--claude", "--anthropic"),
-                    "use the hosted Anthropic Claude API (default)", self._use_claude),
-            Command(("--ollama",), "use the local Ollama model", self._use_ollama),
-            Command(("--api", "--llama"),
-                    "use the hosted Meta Llama API", self._use_llama),
-            Command(("--backend", "--status"),
-                    "show which model you're currently using", self._show_backend),
+            Command(("--status",), "show which model you're talking to", self._show_model),
             Command(("--reset",), "clear your conversation history", self._reset_history),
             Command(("--help", "help"), "show this message", self._show_help),
         ]
 
-    def _switch_backend(self, user: str, backend: str, warning: str = "") -> str:
-        """Move the user to ``backend`` and describe the result."""
-        if not self._agent.set_backend(user, backend):
-            return f":warning: Unknown backend `{backend}`."
-        return f"Switched to *{self._agent.backend_label(user)}*.{warning}"
-
-    def _use_claude(self, user: str) -> str:
-        warning = "" if settings.ANTHROPIC_API_KEY else (
-            "\n:warning: `ANTHROPIC_API_KEY` isn't set, so every turn will fall back "
-            "to the local model until it's added to `.env`."
-        )
-        return self._switch_backend(user, "anthropic", warning)
-
-    def _use_ollama(self, user: str) -> str:
-        return self._switch_backend(user, "ollama")
-
-    def _use_llama(self, user: str) -> str:
-        warning = "" if settings.LLAMA_API_KEY else (
-            "\n:warning: `LLAMA_API_KEY` isn't set, so requests will fail until it's "
-            "added to `.env`."
-        )
-        return self._switch_backend(user, "llama", warning)
-
-    def _show_backend(self, user: str) -> str:
-        return (f"You're currently using *{self._agent.backend_label(user)}*."
-                "\nSwitch with `--claude`, `--ollama`, or `--api`.")
+    def _show_model(self, _user: str) -> str:
+        return f"You're talking to *{models.label()}*."
 
     def _reset_history(self, user: str) -> str:
         self._agent.reset(user)
@@ -153,21 +123,13 @@ class SlackBot:
 
     def _answer(self, user: str, text: str) -> str:
         """Ask the agent for a reply, turning a failure into a reportable message."""
-        log.info("DM from %s (%s): %s", user, self._agent.backend_name(user), text[:80])
+        log.info("DM from %s: %s", user, text[:80])
         try:
-            reply = self._agent.respond(user, text)
+            return self._agent.respond(user, text)
         except Exception as e:
             log.exception("Chat failed")
             detail = str(e) or e.__class__.__name__
             return f":warning: Error: `{detail[:MAX_ERROR_CHARS]}`"
-
-        # Disclose a fallback: the models differ enough that swapping silently
-        # would be misleading.
-        answered_by = self._agent.last_backend(user)
-        if answered_by != self._agent.backend_name(user):
-            reply += (f"\n\n_:warning: {self._agent.backend_label(user)} failed — "
-                      f"this reply came from the `{answered_by}` fallback._")
-        return reply
 
     # --- Running --------------------------------------------------------
 
@@ -190,12 +152,8 @@ class SlackBot:
     def _log_startup(self) -> None:
         log.info("Starting %s", self._agent.name)
         log.info("Tools available: %s", self._agent.tool_names())
-        log.info("Backends: anthropic=%s (key %s), ollama=%s/%s, llama=%s",
-                 settings.ANTHROPIC_MODEL,
-                 "set" if settings.ANTHROPIC_API_KEY else "MISSING",
-                 settings.OLLAMA_HOST, settings.OLLAMA_MODEL, settings.LLAMA_MODEL)
-        log.info("Default backend: %s (fallback: %s)",
-                 settings.DEFAULT_BACKEND, settings.FALLBACK_BACKEND)
+        log.info("Model: %s (key %s)", models.label(),
+                 "set" if settings.ANTHROPIC_API_KEY else "MISSING")
 
 
 def install_shutdown_handler() -> None:
