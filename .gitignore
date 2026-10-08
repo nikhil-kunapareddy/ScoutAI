@@ -31,6 +31,7 @@ downloads/
 exports/
 # Personal working notes.
 notes.md
+docs/TODO.md
 
 # ─── Runtime logs & state ─────────────────────────────────────────────────
 logs/*
