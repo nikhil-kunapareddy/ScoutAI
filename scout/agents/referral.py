@@ -1,5 +1,4 @@
-"""Referral Window: the list of companies where the user knows someone, and the
-jobs open at them."""
+"""Referral Window: the companies where the user knows someone, and their openings."""
 
 from __future__ import annotations
 
@@ -31,9 +30,12 @@ SPEC = AgentSpec(
     key="referral",
     name="Referral Window",
     system_prompt=SYSTEM_PROMPT,
+    # Its only search tool is search_referral_jobs, so it has no way to search
+    # off the list. Never add a per-source job tool here.
     tool_modules=[clock, referrals, referral_jobs],
-    in_digest=True,  # every morning, what is open across the whole list
-    # Not tailor_with_resume: what this agent returns is decided by the referral
-    # list, not by how well a role matches the résumé. Its digest is the list
-    # swept once a day, which is the scope — not every source ranked by fit.
+    # What this agent returns is decided by the referral list, not by how well
+    # a role matches the résumé.
+    tailor_with_resume=False,
+    # Every morning, what is open across the whole list.
+    in_digest=True,
 )

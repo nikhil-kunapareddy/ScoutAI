@@ -1,15 +1,15 @@
 """One log line per turn, so a running bot can be watched without a debugger.
 
 Every turn goes through ``GraphRunner.respond``, which is the one place that
-sees a whole turn — the model calls, the tool hops, and which backend ended up
-answering. That makes it the only sensible place to measure from.
+sees a whole turn — the model calls and the tool hops. That makes it the only
+sensible place to measure from.
 
 The line is ``key=value`` pairs on purpose: greppable with ``journalctl``,
 parseable by CloudWatch Logs Insights if the box ever gets an IAM role, and
 readable as-is.
 
 Cost is reported only when ``USD_PER_MTOK_IN``/``OUT`` are set. Rates are
-configuration rather than a table baked in here: they differ per backend, they
+configuration rather than a table baked in here: they differ per model, they
 change, and a stale hard-coded number is worse than no number at all. Tokens are
 always reported, so the spend is derivable after the fact either way.
 """
@@ -37,8 +37,6 @@ class TurnMetrics:
 
     agent: str
     thread: str
-    backend: str
-    answered_by: str
     outcome: str
     seconds: float
     model_calls: int
@@ -60,8 +58,6 @@ class TurnMetrics:
         fields = [
             f'turn agent="{self.agent}"',
             f"thread={self.thread}",
-            f"backend={self.backend}",
-            f"answered_by={self.answered_by}",
             f"outcome={self.outcome}",
             f"seconds={self.seconds:.1f}",
             f"model_calls={self.model_calls}",
@@ -77,8 +73,6 @@ class TurnMetrics:
 def measure(
     agent: str,
     thread: str,
-    backend: str,
-    answered_by: str,
     outcome: str,
     seconds: float,
     messages: list[BaseMessage],
@@ -88,8 +82,6 @@ def measure(
     Args:
         agent: Display name of the agent that ran.
         thread: Checkpointer thread — the Slack user id, or a digest thread.
-        backend: The backend the turn was asked to use.
-        answered_by: The backend that actually replied; differs on a fallback.
         outcome: ``OK``, ``STUCK``, or ``ERROR``.
         seconds: Wall-clock duration of the turn.
         messages: The full thread after the turn; only what this turn added is
@@ -100,8 +92,6 @@ def measure(
     return TurnMetrics(
         agent=agent,
         thread=thread,
-        backend=backend,
-        answered_by=answered_by,
         outcome=outcome,
         seconds=seconds,
         model_calls=len(replies),

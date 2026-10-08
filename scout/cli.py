@@ -110,16 +110,23 @@ def _run(_args: argparse.Namespace) -> int:
 
     spec = get_spec(settings.ACTIVE_AGENT)
     agent = build_agent(spec)
-    log.info("Agent %r ready (default backend=%s)", spec.key, spec.default_backend)
+    log.info("Agent %r ready", spec.key)
     SlackBot(agent).start()
     return 0
 
 
 def _digest(_args: argparse.Namespace) -> int:
     """Run the active agent's digest once, now."""
+    # `scout digest` lands here. By now `main` has already set AGENT from
+    # --agent. _args is unused: --agent was the only option, and it's handled.
+    #
+    # scout/digest.py — main: runs this agent's digest and DMs you the result.
+    # Imported here, not at the top: scout.digest imports settings, and settings
+    # must load only after AGENT is set, so it picks up the right .env.<agent>.
     from .digest import main as run_digest
 
     run_digest()
+    # 0 means success. Missing config already exited inside run_digest.
     return 0
 
 
@@ -139,9 +146,8 @@ def _agents(_args: argparse.Namespace) -> int:
     for key, spec in sorted(AGENTS.items()):
         marks = " (resume-tailored)" if spec.tailor_with_resume else ""
         print(f"{key:<10} {spec.name}{marks}")
-        print(f"{'':<10} backend: {spec.default_backend}")
         names = [tool.name for tool in agent_tools(spec)]
-        print(f"{'':<10} tools:   {', '.join(names) or 'none'}")
+        print(f"{'':<10} tools: {', '.join(names) or 'none'}")
     return 0
 
 

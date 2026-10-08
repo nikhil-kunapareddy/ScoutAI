@@ -2,11 +2,7 @@
 
 ``build_agent_graph`` (see ``agent.py``) produces the graph; this runs it. Each
 user gets their own checkpointer thread — that thread *is* their conversation
-history — and their chosen backend rides along in the graph config, so one
-compiled graph serves every user on every model. Because history is stored as
-provider-agnostic message objects, a user can switch model mid-conversation, and
-a failed model call can be retried on ``settings.FALLBACK_BACKEND`` within the
-same turn.
+history — so one compiled graph serves every user.
 
 ``GraphRunner`` implements ``ConversationalAgent`` once, for both ``Agent`` here
 and ``ResumeTailoredAgent`` in ``scout/agents/resume_tailored.py``. That is what
@@ -26,7 +22,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph
 
-from . import metrics, models, settings, tracing
+from . import metrics, settings, tracing
 from .agent import AgentSpec, ConversationalAgent, agent_tools, build_agent_graph
 from .checkpoints import build_checkpointer
 from .logging_config import logger
@@ -48,7 +44,7 @@ class GraphRunner(ConversationalAgent):
     """Runs one compiled graph for many Slack users.
 
     Owns everything that is per-user rather than per-graph: the checkpointer
-    thread, the chosen backend, and the lock that serializes a user's turns.
+    thread, and the lock that serializes a user's turns.
     """
 
     #: Floor on the recursion limit: the super-steps this graph needs outside the
@@ -62,15 +58,12 @@ class GraphRunner(ConversationalAgent):
         name: str,
         graph: CompiledStateGraph,
         checkpointer: BaseCheckpointSaver,
-        default_backend: str,
         tools: list[BaseTool],
     ) -> None:
         self.name = name
         self._graph = graph
         self._checkpointer = checkpointer
-        self._default_backend = default_backend
         self._tools = tools
-        self._chosen_backend: dict[str, str] = {}
 
         # slack-bolt dispatches events on a thread pool. One lock per user
         # serializes that user's turns while other users run concurrently;
@@ -93,17 +86,14 @@ class GraphRunner(ConversationalAgent):
             return lock
 
     def _config(self, user_id: str) -> RunnableConfig:
-        """The graph config for one user: their thread and their model.
+        """The graph config for one user: their thread, and the hop limit.
 
         Untraced on purpose: this config is also what the checkpointer reads and
         repairs are written with, which are not turns. ``respond`` makes the
         traced copy for the one call that is.
         """
         return {
-            "configurable": {
-                "thread_id": user_id,
-                "backend": self.backend_name(user_id),
-            },
+            "configurable": {"thread_id": user_id},
             # A tool hop is two super-steps (model, then tools) and a turn ends
             # on a model step, so n model calls is 2n-1 steps.
             "recursion_limit": max(2 * settings.MAX_TOOL_HOPS - 1, self._min_steps),
@@ -113,71 +103,53 @@ class GraphRunner(ConversationalAgent):
         with self._lock_for(user_id):
             self._checkpointer.delete_thread(user_id)
 
-    def backend_name(self, user_id: str) -> str:
-        # Lock-free: dict.get is atomic under the GIL, and a stale read against a
-        # concurrent set_backend is harmless.
-        return self._chosen_backend.get(user_id, self._default_backend)
-
-    def backend_label(self, user_id: str) -> str:
-        return models.label(self.backend_name(user_id))
-
-    def last_backend(self, user_id: str) -> str:
-        """Differs from ``backend_name`` only when the chosen backend failed and
-        the fallback answered."""
-        state = self._graph.get_state(self._config(user_id))
-        return state.values.get("answered_by") or self.backend_name(user_id)
-
-    def set_backend(self, user_id: str, name: str) -> bool:
-        if not models.exists(name):
-            return False
-        with self._lock_for(user_id):
-            self._chosen_backend[user_id] = name
-        return True
-
     # --- Answering a message --------------------------------------------
 
     def respond(self, user_id: str, prompt: str) -> str:
         """Run ``prompt`` through this user's thread and return the reply.
 
         Holds the user's lock for the whole turn, serializing their messages;
-        other users run in parallel.
+        other users run in parallel. A turn that runs out of tool hops is
+        answered with ``STUCK_REPLY``; any other failure is recorded and raised.
+
+        Args:
+            user_id: The thread to run on — a Slack user id, or ``digest:<key>``.
+            prompt: The message to answer.
         """
         with self._lock_for(user_id):
             config = self._config(user_id)
-            started = time.monotonic()
+            started_at = time.monotonic()
             # One turn, one trace (a no-op when tracing is off). The reply is
             # handed back to it so the trace records what the user was told,
             # whichever way the turn ended.
-            with tracing.traced(
-                config, agent=self.name, thread=user_id, prompt=prompt
-            ) as turn:
+            with tracing.traced(config, agent=self.name, thread=user_id, prompt=prompt) as turn:
+                state: dict | None
                 try:
-                    state = self._graph.invoke(
-                        {"messages": [HumanMessage(prompt)]}, turn.config
-                    )
+                    state = self._graph.invoke({"messages": [HumanMessage(prompt)]}, turn.config)
                 except GraphRecursionError:
                     log.warning(
                         "Hit the %s-hop tool limit without a final answer",
                         settings.MAX_TOOL_HOPS,
                     )
+                    state = None
+                    outcome = metrics.STUCK
                     reply = self._give_up(config)
-                    self._measure(user_id, config, started, metrics.STUCK)
-                    turn.answered(reply)
-                    return reply
                 except Exception:
-                    self._measure(user_id, config, started, metrics.ERROR)
+                    self._record_metrics(user_id, config, started_at, metrics.ERROR)
                     raise
+                else:
+                    outcome = metrics.OK
+                    reply = _reply_text(state["messages"][-1])
 
-                self._measure(user_id, config, started, metrics.OK, state)
-                reply = _reply_text(state["messages"][-1])
+                self._record_metrics(user_id, config, started_at, outcome, state)
                 turn.answered(reply)
                 return reply
 
-    def _measure(
+    def _record_metrics(
         self,
         user_id: str,
         config: RunnableConfig,
-        started: float,
+        started_at: float,
         outcome: str,
         state: dict | None = None,
     ) -> None:
@@ -185,7 +157,7 @@ class GraphRunner(ConversationalAgent):
 
         ``state`` is passed on the happy path because the caller already has it;
         the other paths read it back, which also picks up the repair ``_give_up``
-        just wrote. Measuring must never be what breaks a reply, hence the catch.
+        just wrote. Recording must never be what breaks a reply, hence the catch.
         """
         try:
             values = state if state is not None else self._graph.get_state(config).values
@@ -193,10 +165,8 @@ class GraphRunner(ConversationalAgent):
                 metrics.measure(
                     agent=self.name,
                     thread=user_id,
-                    backend=self.backend_name(user_id),
-                    answered_by=values.get("answered_by") or self.backend_name(user_id),
                     outcome=outcome,
-                    seconds=time.monotonic() - started,
+                    seconds=time.monotonic() - started_at,
                     messages=values.get("messages", []),
                 )
             )
@@ -212,14 +182,13 @@ class GraphRunner(ConversationalAgent):
         user's *next* message, not just this one.
         """
         messages = self._graph.get_state(config).values.get("messages", [])
-        abandoned = getattr(messages[-1], "tool_calls", None) if messages else None
-        answers = [
-            ToolMessage(
-                content=STUCK_TOOL_RESULT, tool_call_id=call["id"], name=call["name"]
-            )
-            for call in abandoned or []
+        last_message = messages[-1] if messages else None
+        abandoned_calls = getattr(last_message, "tool_calls", None) or []
+        tool_results = [
+            ToolMessage(content=STUCK_TOOL_RESULT, tool_call_id=call["id"], name=call["name"])
+            for call in abandoned_calls
         ]
-        self._graph.update_state(config, {"messages": [*answers, AIMessage(STUCK_REPLY)]})
+        self._graph.update_state(config, {"messages": [*tool_results, AIMessage(STUCK_REPLY)]})
         return STUCK_REPLY
 
 
@@ -233,7 +202,6 @@ class Agent(GraphRunner):
             name=spec.name,
             graph=build_agent_graph(spec, tools).compile(checkpointer=checkpointer),
             checkpointer=checkpointer,
-            default_backend=spec.default_backend,
             tools=tools,
         )
 

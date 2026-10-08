@@ -6,7 +6,9 @@ server-side, so we hand it the terms and format what comes back.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
+
+from langchain_core.runnables import RunnableConfig
 
 from ..registry import ToolRegistry
 from . import fetch
@@ -17,21 +19,27 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
-    render_postings,
+    parse_unix_timestamp,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 SEARCH_URL = "https://explore.jobs.netflix.net/api/apply/v2/jobs"
 JOB_BASE_URL = "https://explore.jobs.netflix.net/careers/job/"
 ORGANIZATION = "Netflix"
 
-API_PAGE_SIZE = 50  # rows per query, before filtering
+#: Rows per query, before filtering.
+API_PAGE_SIZE = 50
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_netflix_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_netflix_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Netflix's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -44,11 +52,14 @@ def register(reg: ToolRegistry) -> None:
         """
         postings = search(keywords, limit)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or widen your keywords.")
-        return render_postings(
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or widen your keywords."
+            )
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -78,6 +89,7 @@ def _postings_for(query: str) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, newest US roles first."""
     return {
         "domain": "netflix.com",
         "query": query,
@@ -96,14 +108,10 @@ def _to_posting(position: dict, job_id: str, title: str) -> JobPosting:
         url=position.get("canonicalPositionUrl") or (JOB_BASE_URL + job_id),
         location=(position.get("location") or "").strip(),
         date=_parse_created(position.get("t_create")),
+        job_id=source_id("netflix", job_id),
     )
 
 
 def _parse_created(timestamp: object) -> datetime | None:
     """Parse ``t_create`` (unix seconds, sometimes missing) as UTC."""
-    if not isinstance(timestamp, int | float):
-        return None
-    try:
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
+    return parse_unix_timestamp(timestamp)

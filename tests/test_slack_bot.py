@@ -38,8 +38,6 @@ class FakeAgent(ConversationalAgent):
         self.error = error
         self.prompts: list[tuple[str, str]] = []
         self.resets: list[str] = []
-        self.backend = "anthropic"
-        self.answered_with = "anthropic"
 
     def respond(self, user_id: str, prompt: str) -> str:
         self.prompts.append((user_id, prompt))
@@ -49,19 +47,6 @@ class FakeAgent(ConversationalAgent):
 
     def reset(self, user_id: str) -> None:
         self.resets.append(user_id)
-
-    def set_backend(self, user_id: str, name: str) -> bool:
-        self.backend = name
-        return True
-
-    def backend_name(self, user_id: str) -> str:
-        return self.backend
-
-    def backend_label(self, user_id: str) -> str:
-        return f"Label({self.backend})"
-
-    def last_backend(self, user_id: str) -> str:
-        return self.answered_with
 
     def tool_names(self) -> list[str]:
         return ["echo"]
@@ -122,38 +107,20 @@ def test_commands_are_case_insensitive(bot) -> None:
     assert agent.resets == ["U1"]
 
 
-@pytest.mark.parametrize(("text", "expected"), [
-    ("--claude", "anthropic"),
-    ("--anthropic", "anthropic"),
-    ("--ollama", "ollama"),
-    ("--api", "llama"),
-    ("--llama", "llama"),
-])
-def test_backend_switch_commands_and_aliases(bot, monkeypatch, text: str, expected: str) -> None:
-    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "key")
-    monkeypatch.setattr(settings, "LLAMA_API_KEY", "key")
+def test_status_names_the_model(bot, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ANTHROPIC_MODEL", "claude-opus-5")
     _, agent, dispatch = bot
 
-    reply = dispatch(text=text)
-    assert agent.backend == expected
-    assert reply == [f"Switched to *Label({expected})*."]
+    assert dispatch(text="--status") == ["You're talking to *Claude (claude-opus-5)*."]
+    assert agent.prompts == []
 
 
-def test_switching_to_claude_warns_when_the_key_is_missing(bot, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
-    _, _, dispatch = bot
-    assert "ANTHROPIC_API_KEY` isn't set" in dispatch(text="--claude")[0]
-
-
-def test_switching_to_llama_warns_when_the_key_is_missing(bot, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "LLAMA_API_KEY", "")
-    _, _, dispatch = bot
-    assert "LLAMA_API_KEY` isn't set" in dispatch(text="--api")[0]
-
-
-def test_backend_command_reports_the_current_model(bot) -> None:
-    _, _, dispatch = bot
-    assert "You're currently using *Label(anthropic)*." in dispatch(text="--backend")[0]
+@pytest.mark.parametrize("text", ["--claude", "--ollama", "--api", "--backend"])
+def test_the_old_model_switches_are_no_longer_commands(bot, text: str) -> None:
+    """There is one model, so nothing to switch to: the text goes to the agent."""
+    _, agent, dispatch = bot
+    dispatch(text=text)
+    assert agent.prompts == [("U1", text)]
 
 
 def test_help_lists_every_command_and_its_aliases(bot) -> None:
@@ -176,17 +143,7 @@ def test_unknown_dashed_text_is_treated_as_a_prompt(bot) -> None:
 # --- Replies --------------------------------------------------------------
 
 
-def test_fallback_is_disclosed_in_the_reply(bot) -> None:
-    _, agent, dispatch = bot
-    agent.answered_with = "ollama"  # the chosen backend failed
-
-    reply = dispatch(text="hi")[0]
-    assert reply.startswith("the answer")
-    assert "Label(anthropic) failed" in reply
-    assert "`ollama` fallback" in reply
-
-
-def test_no_disclosure_when_the_chosen_backend_answered(bot) -> None:
+def test_the_reply_is_sent_as_the_agent_wrote_it(bot) -> None:
     _, _, dispatch = bot
     assert dispatch(text="hi") == ["the answer"]
 
@@ -249,23 +206,6 @@ def test_sigterm_triggers_the_normal_shutdown_path() -> None:
             os.kill(os.getpid(), signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
-
-
-def test_an_unknown_backend_is_reported_not_silently_ignored(bot, monkeypatch) -> None:
-    """``set_backend`` returning False means the model name is gone or misspelt;
-    the user has to be told, or they keep talking to the old one."""
-    monkeypatch.setattr(slack_bot, "App", FakeApp)
-
-    class Refusing(FakeAgent):
-        def set_backend(self, user_id: str, name: str) -> bool:
-            return False
-
-    sent: list[str] = []
-    SlackBot(Refusing())._app.handler(
-        {"channel_type": "im", "user": "U1", "text": "--ollama"}, sent.append
-    )
-
-    assert sent == [":warning: Unknown backend `ollama`."]
 
 
 # --- Running --------------------------------------------------------------
@@ -345,4 +285,4 @@ def test_startup_logs_name_the_agent_and_its_tools(handlers, caplog) -> None:
     logged = "\n".join(caplog.messages)
     assert "Fake Agent" in logged
     assert "echo" in logged
-    assert "Default backend" in logged
+    assert "Model: Claude (" in logged

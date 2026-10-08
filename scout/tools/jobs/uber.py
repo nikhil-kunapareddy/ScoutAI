@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -24,22 +26,28 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
+    parse_iso_timestamp,
     take_newest,
 )
 from .relevance import is_ai_ml_role, matches_keywords
+from .unsent import render_unsent
 
 SEARCH_URL = "https://jobs.uber.com/api/jobs/search/"
 JOB_BASE_URL = "https://jobs.uber.com"
 ORGANIZATION = "Uber"
 
-US = "United States"     # the display name; "USA" silently matches nothing
-API_PAGE_SIZE = 500      # the whole US board in one response
+#: The display name; "USA" silently matches nothing.
+US = "United States"
+#: The whole US board in one response.
+API_PAGE_SIZE = 500
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_uber_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_uber_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Uber's careers site for recent US job openings relevant to the
         user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -52,11 +60,14 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -71,15 +82,12 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     if rows is None:
         return None
     terms = keywords.lower().split()
-    postings = [
-        posting
-        for row in rows
-        if (posting := _to_posting(row, terms)) is not None
-    ]
+    postings = [posting for row in rows if (posting := _to_posting(row, terms)) is not None]
     return take_newest(postings, limit)
 
 
 def _params() -> dict[str, str | int]:
+    """The query string for the whole US board."""
     return {"countries": US, "pagesize": API_PAGE_SIZE, "page": 1}
 
 
@@ -123,14 +131,5 @@ def _location_text(locations: object) -> str:
 
 
 def _parse_display_date(raw: object) -> datetime | None:
-    """Parse ``DisplayDate``, e.g. 2026-09-17T20:14:41Z.
-
-    ``Z`` is normalised first: ``fromisoformat`` only learned to read it in 3.11,
-    and this package supports 3.10.
-    """
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    """Parse ``DisplayDate``, e.g. 2026-09-17T20:14:41Z."""
+    return parse_iso_timestamp(raw)

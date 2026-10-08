@@ -131,8 +131,6 @@ def test_stats_reads_the_window_it_was_asked_for(monkeypatch, capsys) -> None:
     turn = TurnMetrics(
         agent="BigTech Agent",
         thread="U1",
-        backend="anthropic",
-        answered_by="anthropic",
         outcome="ok",
         seconds=1.0,
         model_calls=1,
@@ -180,6 +178,7 @@ def test_doctor_is_happy_with_a_configured_checkout(monkeypatch, capsys) -> None
 
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setattr(settings, "ACTIVE_AGENT", "bigtech")
 
     assert cli.main(["doctor"]) == 0

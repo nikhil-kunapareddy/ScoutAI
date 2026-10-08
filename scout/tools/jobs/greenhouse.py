@@ -13,14 +13,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from .hosted_board import HostedBoard
-from .posting import DEFAULT_LIMIT, JobPosting
+from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp, source_id
 from .relevance import is_ai_ml_role, matches_keywords
 
 BOARD_URL = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 
-# Board slug -> display name. Add an org = add a line. All verified live.
+#: Board slug -> display name. Add an org = add a line. All verified live.
 BOARDS = {
     "databricks": "Databricks",
     "airbnb": "Airbnb",
@@ -36,13 +38,41 @@ BOARDS = {
     "doordashusa": "DoorDash",
 }
 
-# Markers of a non-US role (Greenhouse locations are free text).
+#: Markers of a non-US role (Greenhouse locations are free text).
 _NON_US = (
-    "india", "canada", "united kingdom", " uk", "ireland", "germany", "france",
-    "netherlands", "israel", "singapore", "australia", "japan", "china", "brazil",
-    "mexico", "spain", "poland", "costa rica", "argentina", "emea", "apac", "romania",
-    "dublin", "london", "berlin", "toronto", "bengaluru", "bangalore", "tokyo",
-    "amsterdam", "sydney", "são paulo", "sao paulo",
+    "india",
+    "canada",
+    "united kingdom",
+    " uk",
+    "ireland",
+    "germany",
+    "france",
+    "netherlands",
+    "israel",
+    "singapore",
+    "australia",
+    "japan",
+    "china",
+    "brazil",
+    "mexico",
+    "spain",
+    "poland",
+    "costa rica",
+    "argentina",
+    "emea",
+    "apac",
+    "romania",
+    "dublin",
+    "london",
+    "berlin",
+    "toronto",
+    "bengaluru",
+    "bangalore",
+    "tokyo",
+    "amsterdam",
+    "sydney",
+    "são paulo",
+    "sao paulo",
 )
 
 
@@ -60,25 +90,22 @@ def _to_posting(job: dict, organization: str, terms: list[str]) -> JobPosting | 
         url=job.get("absolute_url", ""),
         location=location,
         date=_parse_published(job),
+        job_id=source_id("greenhouse", job.get("id")),
     )
 
 
 def _is_us_location(name: str) -> bool:
     """Best-effort: keep US and generic-remote roles, drop clearly-foreign ones."""
-    low = name.lower()
-    if "united states" in low or "usa" in low or "u.s." in low:
+    lowered = name.lower()
+    if "united states" in lowered or "usa" in lowered or "u.s." in lowered:
         return True
     # What's left is a US city/state or a bare "Remote" — treat as US-eligible.
-    return not any(marker in low for marker in _NON_US)
+    return not any(marker in lowered for marker in _NON_US)
 
 
 def _parse_published(job: dict) -> datetime | None:
     """Parse the posting date: ISO 8601 with an offset, e.g. 2026-07-01T18:31:32-04:00."""
-    raw = job.get("first_published") or job.get("updated_at") or ""
-    try:
-        return datetime.fromisoformat(raw)
-    except ValueError:
-        return None
+    return parse_iso_timestamp(job.get("first_published") or job.get("updated_at"))
 
 
 BOARD = HostedBoard(
@@ -95,8 +122,9 @@ search = BOARD.search
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_greenhouse_jobs(
-        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_greenhouse_jobs(  # noqa: D417
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
     ) -> str:
         """Search a big-tech company's Greenhouse careers board for recent US
         AI/ML job openings and return title, date posted, and link.
@@ -109,4 +137,4 @@ def register(reg: ToolRegistry) -> None:
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
         """
-        return BOARD.answer(company, keywords, limit)
+        return BOARD.answer(company, keywords, limit, config)

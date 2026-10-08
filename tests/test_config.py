@@ -113,7 +113,6 @@ def test_configured_credentials_pass(monkeypatch) -> None:
 def test_settings_import_does_not_require_credentials() -> None:
     """The package must stay importable (and testable) with no .env present."""
     assert isinstance(settings.SLACK_BOT_TOKEN, str)
-    assert settings.DEFAULT_BACKEND in ("anthropic", "ollama")
 
 
 # --- Layered env files ----------------------------------------------------

@@ -10,17 +10,44 @@ from __future__ import annotations
 
 import re
 
-# Title phrases and tokens that mark a role as AI/ML. Broad keyword searches drag
-# in finance, supply-chain, hardware, PM and sales roles; this strips them.
+#: Title phrases that mark a role as one worth showing. Lower case, because the
+#: title is lower-cased before matching. Broad keyword searches drag in sales,
+#: hardware and PM roles that merely mention AI; this strips them.
 AI_ML_PHRASES = (
-    "machine learning", "applied scientist", "research scientist",
-    "research engineer", "data scientist", "data science", "deep learning",
-    "generative", "genai", "recommendation", "agentic", "personalization",
-    "conversational",
+    "ai engineer",
+    "artificial intelligence engineer",
+    "data analyst",
+    "analyst",
+    "machine learning",
+    "applied artificial intelligence engineer",
+    "data scientist",
+    "software engineer",
+    "backend software engineer",
+    "software engineer 1",
+    "software engineer 2",
+    "software engineer i",
+    "software engineer ii",
 )
-AI_ML_TOKENS = {"ai", "ml", "llm", "nlp"}
 
-# Stand-ins for "the user's field", used when the model passes no keywords.
+#: Title words and phrases that rule a role out, whatever else the title says:
+#: an excluded title is dropped even when it also matches ``AI_ML_PHRASES``.
+#: Matched as whole words, so "staff" does not drop "Staffing Coordinator".
+EXCLUDED_PHRASES = (
+    "member of technical staff",
+    "senior",
+    "staff",
+    "architect",
+    "principal",
+    "director",
+    "distinguished",
+    "manager",
+)
+
+#: Standalone title words that mark a role as AI/ML. Matched as whole words, so
+#: "ai" does not match "maintenance".
+AI_ML_TOKENS = frozenset({"ai", "ml", "llm", "nlp"})
+
+#: Stand-ins for "the user's field", used when the model passes no keywords.
 PROFILE_QUERIES = (
     "machine learning engineer",
     "applied scientist",
@@ -30,14 +57,22 @@ PROFILE_QUERIES = (
 )
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
+_EXCLUDED_RE = re.compile(r"\b(?:" + "|".join(map(re.escape, EXCLUDED_PHRASES)) + r")\b")
+
+
+def is_excluded(title: str) -> bool:
+    """True if the title carries a word or phrase from ``EXCLUDED_PHRASES``."""
+    return _EXCLUDED_RE.search(title.lower()) is not None
 
 
 def is_ai_ml_role(title: str) -> bool:
-    """True if the title looks like an AI/ML role, by phrase or standalone token."""
-    low = title.lower()
-    if any(phrase in low for phrase in AI_ML_PHRASES):
+    """True if the title is a wanted role: not excluded, and matching a phrase or token."""
+    if is_excluded(title):
+        return False
+    lowered = title.lower()
+    if any(phrase in lowered for phrase in AI_ML_PHRASES):
         return True
-    return bool(set(_WORD_RE.findall(low)) & AI_ML_TOKENS)
+    return not AI_ML_TOKENS.isdisjoint(_WORD_RE.findall(lowered))
 
 
 def matches_keywords(title: str, terms: list[str]) -> bool:
@@ -47,10 +82,11 @@ def matches_keywords(title: str, terms: list[str]) -> bool:
     """
     if not terms:
         return True
-    low = title.lower()
-    return any(term in low for term in terms)
+    lowered = title.lower()
+    return any(term in lowered for term in terms)
 
 
 def search_queries(keywords: str) -> tuple[str, ...]:
     """The searches to run: the caller's phrase, or the user's field by default."""
-    return (keywords.strip(),) if keywords.strip() else PROFILE_QUERIES
+    phrase = keywords.strip()
+    return (phrase,) if phrase else PROFILE_QUERIES

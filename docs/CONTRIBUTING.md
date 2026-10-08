@@ -52,7 +52,7 @@ be green too; it runs the same four commands.
   this repo leans on that: several comments exist because the alternative broke
   something subtle. Please keep that habit, and add the reason when you change
   one of those lines.
-- Names read as prose. `_within_window`, `take_newest`, `answered_by`.
+- Names read as prose. `_within_window`, `take_newest`, `owner_for`.
 
 ## Invariants worth not breaking
 

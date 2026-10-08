@@ -8,6 +8,11 @@ messages instead of one Slack truncates.
 
 from __future__ import annotations
 
+# What each import below is, and where it lives:
+#   WebClient      slack_sdk (installed package)    talks to the Slack Web API
+#   settings       scout/core/settings.py           config; here, SLACK_BOT_TOKEN
+#   logger         scout/core/logging_config.py     the shared "scout" logger
+#   split_message  scout/slack/formatting.py        cuts long text into Slack-sized parts
 from slack_sdk import WebClient
 
 from ..core import settings
@@ -25,8 +30,12 @@ def post_dm(user_id: str, text: str) -> None:
             bot's DM with that person, so no channel lookup is needed.
         text: The message body.
     """
+    # A Slack API client logged in as this agent's bot.
     client = WebClient(token=settings.SLACK_BOT_TOKEN)
+    # Slack cuts off very long messages, so break the text into parts first.
     chunks = split_message(text)
+    # Send each part. Passing a user id as the channel posts into the bot's DM
+    # with that person.
     for chunk in chunks:
         client.chat_postMessage(channel=user_id, text=chunk)
     log.info("Posted %d message(s) to %s", len(chunks), user_id)

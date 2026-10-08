@@ -7,9 +7,11 @@ import pytest
 
 from scout import digest
 from scout.agents import AGENTS
-from scout.core import settings, tracing
+from scout.core import settings, shared_jobs, tracing
 from scout.core.agent import AgentSpec, ConversationalAgent
 from scout.slack import notify
+from scout.tools.jobs import unsent
+from scout.tools.jobs.posting import JobPosting
 
 
 class FakeAgent(ConversationalAgent):
@@ -20,19 +22,40 @@ class FakeAgent(ConversationalAgent):
         self.reply = reply
         self.error = error
         self.prompts: list[tuple[str, str]] = []
+        self.events: list[tuple[str, str]] = []
 
     def respond(self, user_id: str, prompt: str) -> str:
         self.prompts.append((user_id, prompt))
+        self.events.append(("respond", user_id))
         if self.error:
             raise self.error
         return self.reply
 
-    def reset(self, user_id: str) -> None: ...
-    def set_backend(self, user_id: str, name: str) -> bool: return True
-    def backend_name(self, user_id: str) -> str: return "anthropic"
-    def backend_label(self, user_id: str) -> str: return "Claude"
-    def last_backend(self, user_id: str) -> str: return "anthropic"
+    def reset(self, user_id: str) -> None:
+        self.events.append(("reset", user_id))
+
     def tool_names(self) -> list[str]: return []
+
+
+SEEN = JobPosting("ML Engineer", "Amazon", "https://jobs/1", job_id="amazon:1")
+FRESH = JobPosting("AI Engineer", "Amazon", "https://jobs/2", job_id="amazon:2")
+
+
+class SearchingAgent(FakeAgent):
+    """Shows two postings the way a job tool does, then reports only one."""
+
+    def respond(self, user_id: str, prompt: str) -> str:
+        super().respond(user_id, prompt)
+        config = {"configurable": {"thread_id": user_id}}
+        unsent.render_unsent("*{count} found:*", [SEEN, FRESH], config=config)
+        return "1. *AI Engineer* — Amazon\n    New this week\n    Oct 07 · https://jobs/2"
+
+
+@pytest.fixture
+def searching_agent(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ACTIVE_AGENT", "alpha")
+    monkeypatch.setattr(digest, "AGENTS", {"alpha": _spec("alpha", digested=True)})
+    monkeypatch.setattr(digest, "build_agent", lambda spec: SearchingAgent(spec.name, ""))
 
 
 def _spec(key: str, *, digested: bool) -> AgentSpec:
@@ -178,8 +201,7 @@ def test_the_prompt_asks_for_what_could_not_be_checked(three_agents) -> None:
 
 def test_the_prompt_pins_the_layout(three_agents) -> None:
     """The report is prose by the time it exists, so the only place the shape
-    can be fixed is the request. Without this it drifts between days, and
-    between backends."""
+    can be fixed is the request. Without this it drifts between days."""
     digest.run_digest(_spec("alpha", digested=True))
     asked = three_agents["alpha"].prompts[0][1]
 
@@ -212,6 +234,59 @@ def test_the_report_is_headed_by_the_agent_that_wrote_it(three_agents) -> None:
 
     assert report.startswith("*Alpha Agent — ")
     assert "roles from alpha" in report
+
+
+def test_the_thread_starts_clean_every_morning(three_agents) -> None:
+    """What was sent lives in the shared store, so yesterday's turn is only
+    weight — and a stale résumé profile."""
+    digest.run_digest(_spec("alpha", digested=True))
+
+    assert three_agents["alpha"].events == [("reset", "digest:alpha"), ("respond", "digest:alpha")]
+
+
+def test_the_prompt_leaves_repeats_to_the_code(three_agents) -> None:
+    """The model no longer has to remember yesterday; the tools already hid it."""
+    digest.run_digest(_spec("alpha", digested=True))
+    asked = three_agents["alpha"].prompts[0][1]
+
+    assert "left out of what your tools return" in asked
+    assert "earlier in this conversation" not in asked
+
+
+def test_main_records_what_the_dm_linked_to(searching_agent, deliverable) -> None:
+    """Only the model's picks are recorded: the role it left out is still new."""
+    digest.main()
+
+    assert shared_jobs.recently_shared("alpha", 30) == {"amazon:2"}
+
+
+def test_a_dm_that_fails_to_post_records_nothing(searching_agent, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
+    monkeypatch.setattr(settings, "DIGEST_SLACK_USER", "U1")
+
+    def refuse(user: str, text: str) -> None:
+        raise RuntimeError("channel_not_found")
+
+    monkeypatch.setattr(digest, "post_dm", refuse)
+
+    with pytest.raises(RuntimeError):
+        digest.main()
+
+    assert shared_jobs.recently_shared("alpha", 30) == set()
+
+
+def test_a_store_that_cannot_be_written_still_sends_the_digest(
+    searching_agent, deliverable, monkeypatch
+) -> None:
+    """Tomorrow may repeat a role; today's DM has already gone."""
+    def broken(agent: str, postings: object) -> int:
+        raise shared_jobs.SharedJobsError("state/shared.sqlite: readonly database")
+
+    monkeypatch.setattr(shared_jobs, "record", broken)
+
+    digest.main()
+
+    assert "AI Engineer" in deliverable[0][1]
 
 
 def test_a_failed_run_still_delivers_a_message(monkeypatch) -> None:

@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import TypeVar
 
-# Shared result-count bounds. Sources with a date window define their own days.
+#: Shared result-count bounds. Sources with a date window define their own days.
 DEFAULT_LIMIT = 15
 MAX_LIMIT = 25
+
+#: Whatever one request to a source is keyed by: a search phrase, a page number.
+Query = TypeVar("Query")
 
 
 @dataclass
@@ -25,8 +29,24 @@ class JobPosting:
     organization: str
     url: str
     location: str = ""
-    date: datetime | None = None  # when the source publishes a real date
-    posted_label: str = ""        # the source's own wording, when it doesn't
+    #: When the source publishes a real date.
+    date: datetime | None = None
+    #: The source's own wording, when it doesn't.
+    posted_label: str = ""
+    #: The source's own id for the opening, namespaced by ``source_id``.
+    job_id: str = ""
+
+    @property
+    def key(self) -> str | None:
+        """What a digest remembers this opening by, or None if nothing is stable.
+
+        The source's id where it has one, the link where it doesn't. A posting
+        with neither can't be told from the next one, so it is never hidden and
+        never recorded.
+        """
+        if self.job_id:
+            return self.job_id
+        return f"url:{self.url}" if self.url else None
 
     @property
     def sort_key(self) -> float:
@@ -57,28 +77,37 @@ Searcher = Callable[[str, int], list[JobPosting] | None]
 QueryResults = list[tuple[str, JobPosting]] | None
 
 
+def source_id(source: str, native: object) -> str:
+    """A ``job_id`` namespaced by source, e.g. ``amazon:2876543``, or "" without one.
+
+    The prefix keeps two sources' ids apart: Oracle's 344271 and another board's
+    344271 are different openings.
+    """
+    text = str(native or "").strip()
+    return f"{source}:{text}" if text else ""
+
+
 def clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
     """Coerce to an int within bounds.
 
-    Small models routinely pass ``limit="ten"`` or ``days=0``, and a tool that
+    The model will sometimes pass ``limit="ten"`` or ``days=0``, and a tool that
     raises on junk input wastes a whole turn.
     """
-    number = default
-    if isinstance(value, int | float | str):
-        try:
-            number = int(value)
-        except ValueError:  # "ten", "", "1.2.3"
-            number = default
+    try:
+        number = int(value) if isinstance(value, int | float | str) else default
+    except ValueError:  # "ten", "", "1.2.3"
+        number = default
     return min(max(number, minimum), maximum)
 
 
 def merge_queries(
-    queries: Iterable[str], postings_for: Callable[[str], QueryResults]
+    queries: Iterable[Query], postings_for: Callable[[Query], QueryResults]
 ) -> list[JobPosting] | None:
     """Run every query against one source and de-dupe the results, first wins.
 
-    The sources with a keyword box are searched several times over — once per
-    profile query — so the merge is the same everywhere and lives here.
+    A query is whatever one request is keyed by: a profile phrase for the sources
+    searched several times over, or a page for the ones read a page at a time.
+    Either way the merge is the same, so it lives here.
 
     Every query failing means the source is down, which a caller may need to
     report differently from "the source has nothing"; one query getting through
@@ -108,8 +137,8 @@ def render_postings(header: str, postings: list[JobPosting], footer: str = "") -
     from several tools.
     """
     lines = [header.format(count=len(postings)), ""]
-    for i, posting in enumerate(postings, 1):
-        lines.append(f"{i}. *{posting.title}*")
+    for rank, posting in enumerate(postings, 1):
+        lines.append(f"{rank}. *{posting.title}*")
         lines.append(f"    Organization: {posting.organization}")
         if posting.location:
             lines.append(f"    Location: {posting.location}")
@@ -119,3 +148,31 @@ def render_postings(header: str, postings: list[JobPosting], footer: str = "") -
     if footer:
         lines.append(footer)
     return "\n".join(lines)
+
+
+def parse_iso_timestamp(raw: object) -> datetime | None:
+    """Parse an ISO 8601 timestamp, or None if ``raw`` isn't one.
+
+    ``Z`` is normalised first: ``fromisoformat`` only learned to read it in 3.11,
+    and this package supports 3.10.
+    """
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def parse_unix_timestamp(raw: object) -> datetime | None:
+    """Parse Unix seconds as a UTC datetime, or None if ``raw`` isn't one.
+
+    ``bool`` is refused although Python counts it as an int, and a value too large
+    for the platform's clock reads as missing rather than raising.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    try:
+        return datetime.fromtimestamp(raw, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None

@@ -22,6 +22,8 @@ from __future__ import annotations
 from datetime import datetime
 from urllib.parse import quote
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -29,27 +31,33 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 API_URL = (
-    "https://eeho.fa.us2.oraclecloud.com"
-    "/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 )
 JOB_BASE_URL = "https://careers.oracle.com/en/sites/jobsearch/job"
 ORGANIZATION = "Oracle"
 
 SITE_NUMBER = "CX_45001"
-US_FACET = "300000000149325"          # "United States"
-DEFAULT_SEARCH = "machine learning"   # when the model passes no keywords
-API_PAGE_SIZE = 200                   # one page covers the US AI/ML slice
+#: The location facet id for "United States".
+US_FACET = "300000000149325"
+#: Searched when the model passes no keywords.
+DEFAULT_SEARCH = "machine learning"
+#: One page covers the US AI/ML slice.
+API_PAGE_SIZE = 200
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_oracle_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_oracle_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Oracle's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -62,11 +70,14 @@ def register(reg: ToolRegistry) -> None:
         if postings is None:
             return f"Couldn't reach {ORGANIZATION}'s careers site right now. Try again later."
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
+            return (
+                f"No relevant {ORGANIZATION} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -77,16 +88,14 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     companies at once can merge and count them — see ``jobs/directory.py``.
     """
     limit = clamp_int(limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-    rows = _requisitions(keywords.strip() or DEFAULT_SEARCH)
+    rows = _rows_for(keywords.strip() or DEFAULT_SEARCH)
     if rows is None:
         return None
-    postings = [
-        posting for row in rows if (posting := _to_posting(row)) is not None
-    ]
+    postings = [posting for row in rows if (posting := _to_posting(row)) is not None]
     return take_newest(postings, limit)
 
 
-def _requisitions(query: str) -> list[dict] | None:
+def _rows_for(query: str) -> list[dict] | None:
     """The postings, or None if the board could not be read.
 
     A missing ``requisitionList`` means the request lost its ``expand`` — the
@@ -130,6 +139,7 @@ def _to_posting(job: dict) -> JobPosting | None:
         url=f"{JOB_BASE_URL}/{job_id}" if job_id else "",
         location=(job.get("PrimaryLocation") or "").strip(),
         date=_parse_posted(job.get("PostedDate")),
+        job_id=source_id("oracle", job_id),
     )
 
 

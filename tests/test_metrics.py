@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from scout.core import metrics, settings
@@ -25,8 +26,7 @@ def _reply(text: str, *, inp: int = 0, out: int = 0) -> AIMessage:
 
 def _measure(messages, outcome=metrics.OK):
     return metrics.measure(
-        agent="A", thread="U1", backend="primary", answered_by="primary",
-        outcome=outcome, seconds=1.0, messages=messages,
+        agent="A", thread="U1", outcome=outcome, seconds=1.0, messages=messages,
     )
 
 
@@ -42,7 +42,7 @@ def test_only_this_turn_is_counted() -> None:
     assert m.output_tokens == 5
 
 
-def test_tool_hops_are_counted(chat_models) -> None:
+def test_tool_hops_are_counted(chat_model) -> None:
     m = _measure([
         HumanMessage("find jobs"),
         calls_tool("echo"),
@@ -77,8 +77,8 @@ def test_cost_uses_the_configured_rates(monkeypatch) -> None:
     assert "usd=90.0000" in m.as_line()
 
 
-def test_a_real_turn_logs_a_line(spec, chat_models, caplog) -> None:
-    chat_models["primary"].replies = [_reply("hello", inp=12, out=3)]
+def test_a_real_turn_logs_a_line(spec, chat_model, caplog) -> None:
+    chat_model.replies = [_reply("hello", inp=12, out=3)]
     with caplog.at_level(logging.INFO, logger="scout"):
         Agent(spec).respond("U1", "hi")
 
@@ -90,23 +90,19 @@ def test_a_real_turn_logs_a_line(spec, chat_models, caplog) -> None:
     assert "out_tokens=3" in line
 
 
-def test_a_fallback_turn_names_the_backend_that_answered(
-    spec, chat_models, caplog
-) -> None:
-    chat_models["primary"].fails = True
-    chat_models["fallback"].replies = [_reply("rescued", inp=5, out=2)]
+def test_a_failed_turn_is_recorded_as_an_error(spec, chat_model, caplog) -> None:
+    chat_model.fails = True
 
-    with caplog.at_level(logging.INFO, logger="scout"):
+    with caplog.at_level(logging.INFO, logger="scout"), pytest.raises(RuntimeError):
         Agent(spec).respond("U1", "hi")
 
     line = next(r.message for r in caplog.records if r.message.startswith("turn "))
-    assert "backend=primary" in line
-    assert "answered_by=fallback" in line
+    assert "outcome=error" in line
 
 
-def test_a_stuck_turn_is_recorded_as_such(spec, chat_models, caplog, monkeypatch) -> None:
+def test_a_stuck_turn_is_recorded_as_such(spec, chat_model, caplog, monkeypatch) -> None:
     monkeypatch.setattr(settings, "MAX_TOOL_HOPS", 1)
-    chat_models["primary"].replies = [calls_tool("echo")] * 5
+    chat_model.replies = [calls_tool("echo")] * 5
 
     with caplog.at_level(logging.INFO, logger="scout"):
         Agent(spec).respond("U1", "hi")
@@ -115,11 +111,11 @@ def test_a_stuck_turn_is_recorded_as_such(spec, chat_models, caplog, monkeypatch
     assert "outcome=stuck" in line
 
 
-def test_measuring_never_breaks_a_reply(spec, chat_models, monkeypatch) -> None:
+def test_measuring_never_breaks_a_reply(spec, chat_model, monkeypatch) -> None:
     monkeypatch.setattr(
         metrics, "measure", lambda **_: (_ for _ in ()).throw(ValueError("boom"))
     )
-    chat_models["primary"].replies = [AIMessage("still answered")]
+    chat_model.replies = [AIMessage("still answered")]
     assert Agent(spec).respond("U1", "hi") == "still answered"
 
 
@@ -129,8 +125,6 @@ def test_a_thread_with_no_user_message_is_measured_whole() -> None:
     measured = metrics.measure(
         agent="Test Agent",
         thread="U1",
-        backend="primary",
-        answered_by="primary",
         outcome=metrics.OK,
         seconds=0.5,
         messages=[AIMessage("orphaned")],

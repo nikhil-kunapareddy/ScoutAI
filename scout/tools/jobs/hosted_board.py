@@ -1,8 +1,8 @@
 """A careers-board platform that hosts many companies.
 
-Greenhouse and Ashby are not two job sources; they are one shape written twice —
-a board per company at a predictable URL, no server-side filtering, one JSON row
-per opening. This holds the shape: the slug lookup, the fetch, the title
+Greenhouse, Ashby and SmartRecruiters are not three job sources; they are one
+shape written three times — a board per company at a predictable URL, one JSON
+row per opening. This holds the shape: the slug lookup, the fetch, the title
 filtering, and the three answers such a tool has to tell apart (company we don't
 host, board that was down, board with nothing matching). A platform module fills
 in only what differs: where its boards live, and how to read one of its rows.
@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from . import fetch
 from .posting import (
     DEFAULT_LIMIT,
@@ -24,9 +26,9 @@ from .posting import (
     JobPosting,
     Searcher,
     clamp_int,
-    render_postings,
     take_newest,
 )
+from .unsent import render_unsent
 
 #: Reads one board row into a posting, or None to skip it. ``organization`` is
 #: the company's display name and ``terms`` the lower-cased words the caller
@@ -38,10 +40,14 @@ RowReader = Callable[[dict, str, list[str]], JobPosting | None]
 class HostedBoard:
     """One board platform: where its boards are, and how to read a row."""
 
-    platform: str          # display name, for the unknown-company message
-    board_url: str         # formatted with the board slug
-    rows_key: str          # the JSON key the openings sit under
-    boards: dict[str, str] # board slug -> company display name
+    #: Display name, for the unknown-company message.
+    platform: str
+    #: Formatted with the board slug.
+    board_url: str
+    #: The JSON key the openings sit under.
+    rows_key: str
+    #: Board slug -> company display name.
+    boards: dict[str, str]
     read_row: RowReader
 
     def search(
@@ -72,23 +78,33 @@ class HostedBoard:
         """This platform's ``Searcher`` for one company. See ``jobs/directory.py``."""
         return partial(self.search, slug)
 
-    def answer(self, company: str, keywords: str, limit: int) -> str:
-        """The reply a tool returns: the roles, or which gap it hit."""
+    def answer(self, company: str, keywords: str, limit: int, config: RunnableConfig) -> str:
+        """The reply a tool returns: the roles, or which gap it hit.
+
+        Args:
+            company: The company as the model named it.
+            keywords: As the tool was given them.
+            limit: As the tool was given it.
+            config: The tool's run config; see ``unsent.render_unsent``.
+        """
         slug = _slug(company)
         if slug not in self.boards:
             supported = ", ".join(sorted(self.boards))
-            return (f"Unknown company '{company}'. "
-                    f"Supported {self.platform} companies: {supported}.")
+            return f"Unknown company '{company}'. Supported {self.platform} companies: {supported}."
 
         name = self.boards[slug]
         postings = self.search(slug, keywords, limit)
         if postings is None:
             return f"Couldn't reach {name}'s careers board right now. Try again later."
         if not postings:
-            return (f"No relevant {name} roles found right now. "
-                    "Try again later or adjust your keywords.")
-        return render_postings(
-            f"*Latest {name} AI/ML roles (most recent first) — {{count}} found:*", postings
+            return (
+                f"No relevant {name} roles found right now. "
+                "Try again later or adjust your keywords."
+            )
+        return render_unsent(
+            f"*Latest {name} AI/ML roles (most recent first) — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 

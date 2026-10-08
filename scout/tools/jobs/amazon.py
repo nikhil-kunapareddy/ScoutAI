@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -19,24 +21,32 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 SEARCH_URL = "https://www.amazon.jobs/en/search.json"
 JOB_BASE_URL = "https://www.amazon.jobs"
 ORGANIZATION = "Amazon"
 
-DEFAULT_DAYS = 1  # last 24h
+#: The tool's default window: the last 24h.
+DEFAULT_DAYS = 1
 MAX_DAYS = 30
-API_PAGE_SIZE = 100  # rows per query, before filtering
+#: Rows per query, before filtering.
+API_PAGE_SIZE = 100
 
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_amazon_jobs(
-        keywords: str = "", days: int = DEFAULT_DAYS, limit: int = DEFAULT_LIMIT
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_amazon_jobs(  # noqa: D417
+        keywords: str = "",
+        days: int = DEFAULT_DAYS,
+        limit: int = DEFAULT_LIMIT,
+        *,
+        config: RunnableConfig,
     ) -> str:
         """Search Amazon's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
@@ -52,10 +62,14 @@ def register(reg: ToolRegistry) -> None:
 
         postings = search(keywords, limit, days)
         if not postings:
-            return (f"No relevant {ORGANIZATION} roles found in the {window}. "
-                    "Try again later or widen the window.")
-        return render_postings(
-            f"*Latest {ORGANIZATION} AI/ML roles ({window}) — {{count}} found:*", postings
+            return (
+                f"No relevant {ORGANIZATION} roles found in the {window}. "
+                "Try again later or widen the window."
+            )
+        return render_unsent(
+            f"*Latest {ORGANIZATION} AI/ML roles ({window}) — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 
@@ -89,6 +103,7 @@ def _postings_for(query: str, cutoff: datetime) -> QueryResults:
 
 
 def _params(query: str) -> dict[str, str | int]:
+    """The query string for one keyword search, newest US roles first."""
     return {
         "base_query": query,
         "normalized_country_code[]": "USA",
@@ -114,6 +129,7 @@ def _to_posting(job: dict, cutoff: datetime) -> JobPosting | None:
         url=JOB_BASE_URL + job.get("job_path", ""),
         location=(job.get("location") or "").strip(),
         date=posted,
+        job_id=source_id("amazon", job.get("id")),
     )
 
 

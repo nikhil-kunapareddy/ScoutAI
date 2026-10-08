@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Scout is a multi-agent platform for Slack DM bots, built on **LangGraph**. An
-agent = a system prompt + a set of tools, running on Claude (default), Ollama, or
-the Meta Llama API, switchable per-user at runtime. Two job-search agents ship
+agent = a system prompt + a set of tools, running on Claude through the
+Anthropic API — the only model backend, by decision. Two job-search agents ship
 with it, both tailored to the user's resume in `data/`, plus a Referral Window
 that keeps the list of companies the user has a connection at and searches it
 as a scope, so its answer is every opening the user could ask a referral for.
@@ -56,16 +56,17 @@ which a merge does not carry. See the AWS section of docs/deployment.md.
 | `scout/checks.py` | What `scout doctor` reports; local reads only, never a network call |
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, `ConversationalAgent`, and the graph builder |
 | `scout/core/runner.py` | `GraphRunner` and `Agent` — driving a compiled graph for many users |
-| `scout/core/models.py` | One LangChain chat model per backend, built lazily |
+| `scout/core/models.py` | The Claude chat model (`ChatAnthropic`), built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`, `referrals`) |
-| `scout/tools/jobs/` | One module per job source, over shared parts: `fetch` (HTTP), `feeds` (RSS), `posting` (the record, merging, rendering), `relevance` (which titles count), `hosted_board` (the Greenhouse/Ashby shape), `directory` (company → board) |
+| `scout/tools/jobs/` | One module per job source, over shared parts: `fetch` (HTTP), `feeds` (RSS), `posting` (the record, merging, rendering), `relevance` (which titles count), `hosted_board` (the Greenhouse/Ashby shape), `directory` (company → board), `unsent` (what a digest already sent, hidden) |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | `split_message`, shared by the bot and `notify` |
 | `scout/slack/notify.py` | Opening a DM nobody asked for (digest, alerts) |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral list store — JSON in `state/`, keyed by user |
+| `scout/core/shared_jobs.py` | The shared store — SQLite in `state/` every process opens: what each digest has sent |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/core/tracing.py` | Langfuse — the per-turn call tree; the only module that imports it |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
@@ -96,8 +97,10 @@ START ──▶ (profile cached?) ──yes──▶ job_agent ──▶ END
 
 Three seams hold the layers apart — keep them intact:
 
-- **LangChain chat models** — one provider each, in `models.py`. New provider =
-  one builder plus one entry in `_BUILDERS`.
+- **`models.py`** — the one module that knows the model is Claude. The graph
+  sees a LangChain chat model with tools bound and nothing more. Anthropic is
+  the only backend on purpose: don't bring back a provider registry, a per-user
+  model switch, or a fallback to another provider.
 - **`ConversationalAgent`** — everything `scout/slack/` knows about an agent.
   `GraphRunner` implements it once for both `Agent` and `ResumeTailoredAgent`, so
   the adapter has no special cases. Don't reach past it from the Slack layer.
@@ -106,8 +109,8 @@ Three seams hold the layers apart — keep them intact:
 ## Conventions
 
 - **Adding an agent:** one file in `scout/agents/` defining `SPEC = AgentSpec(...)`,
-  registered in `AGENTS` in `scout/agents/__init__.py`. Omit `default_backend` to
-  inherit `settings.DEFAULT_BACKEND`. Never edit the graph to add an agent.
+  registered in `AGENTS` in `scout/agents/__init__.py`. Never edit the graph to
+  add an agent.
 - **The digest derives its agents**, it does not list them: `in_digest` is the
   marker, so a new job agent joins the digest by existing. Don't add a registry
   beside `AGENTS`. It is deliberately *not* `tailor_with_resume` — that flag
@@ -135,6 +138,12 @@ Three seams hold the layers apart — keep them intact:
   the tool is a thin renderer over. `None` means the source was unreachable and
   is never the same answer as `[]`. If the source is a company board, add it to
   `jobs/directory.py` so a referral there is searchable.
+- **A job tool renders through `unsent.render_unsent(..., config=config)`**, never
+  `render_postings` directly, so it takes `*, config: RunnableConfig` like the
+  referral tools. That is what keeps a digest from showing a role it already
+  sent. Give each posting `job_id=source_id("<source>", <native id>)` where the
+  source has an id; without one, a posting is remembered by its link.
+  `test_no_job_tool_asks_the_model_for_its_config` guards the schema.
 - **Tools never raise for an expected failure** (site down, no results). Return a
   sentence the model can read and act on. Argument *types* are now LangChain's
   problem — see below.
@@ -160,32 +169,33 @@ Three seams hold the layers apart — keep them intact:
   because the Dockerfile and `deploy.sh` install from the flat list.
 - Ruff, `line-length = 100`, py310 target. `ANN` is on for `scout/`, so every
   function there is annotated, and `mypy` runs with `disallow_untyped_defs`.
-  The two scoped `mypy` overrides (docx2txt, `scout.core.models`) are explained
-  in `pyproject.toml` — prefer fixing a type over widening them.
+  The one scoped `mypy` override (`scout.core.models`) is explained in
+  `pyproject.toml` — prefer fixing a type over widening it.
 
 ## Invariants worth not breaking
 
 - **History is the checkpointer thread**, one per Slack user, keyed by user id.
-  It holds provider-agnostic LangChain messages, which is what lets a user switch
-  model mid-conversation. `reset` deletes the thread.
+  It holds LangChain messages, which `ChatAnthropic` renders into the API's
+  format on every call. `reset` deletes the thread.
 - **Tool traffic is checkpointed too** (unlike the old hand-rolled loop, where it
   was per-turn). The model remembers what it looked up; it also counts against
   the `MAX_TURNS` window in `_within_window`.
-- **`trim_messages(..., start_on="human")` is load-bearing.** Providers reject a
+- **`trim_messages(..., start_on="human")` is load-bearing.** The API rejects a
   conversation opening on the assistant's side, and a tool result must never lead
   it or be split from the call it answers.
 - **`bind_tools` discards kwargs bound before it.** In `models.with_tools`, the
-  provider options go on *after* the tools or they vanish silently — that is what
+  request options go on *after* the tools or they vanish silently — that is what
   `test_tools_and_request_options_both_survive_binding` guards.
 - **The hop limit repairs the thread.** On `GraphRecursionError`, `_give_up`
   answers the abandoned tool calls before recording the apology; skipping it
   breaks the user's *next* message, not just this one.
 - **A subgraph is handed the recursion limit afresh**, so `_min_steps` is a floor,
   never an addition — adding to it hands the inner loop extra tool hops.
-- **The fallback retry lives in the model node**, not around the turn: a node that
-  raises commits nothing, so the retry starts clean while keeping tool results
-  the turn already fetched. An empty `FALLBACK_BACKEND` disables it (the
-  container has no Ollama).
+- **A failed model call fails the turn.** There is no fallback model:
+  `ChatAnthropic` retries transient errors itself, and what still fails reaches
+  the Slack adapter's error reply. A node that raises commits nothing, so the
+  thread keeps the tool results already fetched and the user's next message
+  goes through. `test_a_failed_call_leaves_the_thread_usable` guards it.
 - **Per-user locks stay.** slack-bolt dispatches on a thread pool; one lock per
   user serializes their turns while other users run concurrently.
 - **State is in memory unless `CHECKPOINT_DB` says otherwise** — see
@@ -219,6 +229,14 @@ Three seams hold the layers apart — keep them intact:
   is completeness, and a silently short list is the one way to break it. That is
   why company-to-board routing is a table in `jobs/directory.py` rather than
   something the model is asked to get right.
+- **What a digest sent is in the shared store, not its thread.** In a digest
+  turn, `render_unsent` drops what that agent sent within `DIGEST_DEDUPE_DAYS`
+  before the model sees it; after the DM is posted — never before — the digest
+  records the postings whose links the DM carries, so only the model's picks
+  count. The thread then holds nothing the next run needs, and `_request_report`
+  resets it every run. A store that can't be read or written costs a repeat,
+  never the digest: `SharedJobsError` becomes a footer note or a log line.
+  Records are per agent, `(agent, job_id)`.
 - **The digest runs on `digest:<key>` threads, which are not people.**
   `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
   looks up a user id that has no referrals and quietly stops ranking by them.
@@ -230,7 +248,7 @@ Three seams hold the layers apart — keep them intact:
 - **Monitoring never breaks a turn.** The Langfuse import, client and handler
   are built inside one `try` in `tracing.handler`, which logs once and leaves
   tracing off for the process; export is batched on a background thread, so an
-  unreachable backend costs a turn nothing. The traced config is a *copy*, so
+  unreachable Langfuse costs a turn nothing. The traced config is a *copy*, so
   the checkpointer reads and the `_give_up` repair stay outside the trace.
   `test_a_turn_still_answers_when_tracing_will_not_start` guards it.
 - **Trace names are an API, and the trace's input/output is the reply.**
@@ -263,8 +281,8 @@ Three seams hold the layers apart — keep them intact:
 
 ## Tests
 
-`tests/` scripts the chat models (`ScriptedModel` in `conftest.py`, installed into
-`scout.core.models` as a real backend) and stubs every HTTP call (`FakeRequests`
+`tests/` scripts the chat model (`ScriptedModel` in `conftest.py`, installed into
+`scout.core.models` in place of Claude) and stubs every HTTP call (`FakeRequests`
 and `call_tool`, same file), so the suite runs in CI with no `.env` and no
 network. Keep it that way — a test that reaches a real job board or model API
 doesn't belong here. Job sources are stubbed at one seam, `jobs/fetch.requests`,
@@ -272,8 +290,9 @@ which is the point of them all going through `fetch`.
 
 A test must not depend on the developer's own `.env` or `data/` either: point
 `settings` at a `tmp_path` (see `tests/test_checks.py`), or it passes here and
-fails in CI. Coverage is 100% of statements *and* branches, and `fail_under`
-holds it there; CI runs 3.10–3.13.
+fails in CI. The autouse `shared_db` fixture in `conftest.py` does this for
+`SHARED_DB`, since every digest test writes to the store. Coverage is 100% of
+statements *and* branches, and `fail_under` holds it there; CI runs 3.10–3.13.
 
 The suite also pins `LANGSMITH_TRACING=false` (`tests/conftest.py`). Scout
 dropped LangSmith, but `langsmith` still arrives with `langchain-core` and reads

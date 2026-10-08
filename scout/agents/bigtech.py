@@ -44,17 +44,32 @@ SYSTEM_PROMPT = (
     "Keep replies short and Slack-friendly."
 )
 
+#: Companies with a careers site of their own, one tool each.
+_COMPANY_SOURCES = (
+    amazon,
+    google,
+    netflix,
+    lenovo,
+    microsoft,
+    apple,
+    oracle,
+    uber,
+    cisco,
+    bloomberg,
+)
+
+#: Platforms that host many companies' boards; each tool takes a company name.
+_PLATFORM_SOURCES = (greenhouse, ashby, smartrecruiters, workday)
+
 SPEC = AgentSpec(
     key="bigtech",
     name="BigTech Agent",
     system_prompt=SYSTEM_PROMPT,
-    # No referrals_read, by request: this agent ranks on fit and recency, and
-    # the referral list is the Referral Window's scope rather than a tiebreak
-    # here. Same for Edu — no job agent holds a referral tool.
-    tool_modules=[clock, location,
-                  # one module per source; the shared platforms take a company name
-                  amazon, google, netflix, lenovo, microsoft, apple, oracle, uber,
-                  cisco, bloomberg, greenhouse, ashby, smartrecruiters, workday],
-    tailor_with_resume=True,  # supplies the candidate profile the prompt expects
-    in_digest=True,           # sweeps every source into its own morning DM
-)  # default_backend omitted: inherits settings.DEFAULT_BACKEND (Claude, else Ollama)
+    # No referral tool, not even referrals_read: job agents rank on fit and
+    # recency, and the referral list is the Referral Window's scope.
+    tool_modules=[clock, location, *_COMPANY_SOURCES, *_PLATFORM_SOURCES],
+    # Supplies the candidate profile the prompt refers to.
+    tailor_with_resume=True,
+    # Sweeps every source into its own morning DM.
+    in_digest=True,
+)

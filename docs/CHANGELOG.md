@@ -7,7 +7,27 @@ first release.
 
 ## [Unreleased]
 
+### Added
+
+- **A digest never sends you the same job twice within a month.** What each
+  agent's digest sent is recorded in a shared SQLite store, `state/shared.sqlite`
+  (`SHARED_DB`), and every job tool hides those jobs from the model during the
+  next digests — for `DIGEST_DEDUPE_DAYS`, 30 by default. Only the roles the DM
+  actually links to are recorded, so one ranked out today is still new tomorrow.
+  This replaces asking the model to remember yesterday's report, which had
+  already dropped out of its history window. Postings now carry a `job_id` from
+  their source (`amazon:2876543`), falling back to the link. The digest also
+  resets its own thread at the start of every run, so it picks up a changed
+  résumé the next morning, and `scout doctor` reports the store's path.
+
 ### Changed
+
+- **The résumé is `data/resume.pdf`, and only that.** The Resume Parser used to
+  read whichever PDF, DOCX, TXT or MD file in `data/` was newest; now it reads
+  the one file under that name and ignores the rest, so which résumé a profile
+  came from is never a guess. `scout doctor` checks the same path, and
+  `docx2txt` is no longer a dependency. Rename an existing résumé to
+  `resume.pdf` — on the box too, since a merge never touches its `data/`.
 
 - **The digest is one report per agent, in that agent's own Slack DM.** It used
   to run every job agent in a single process and post one merged message — and
@@ -46,6 +66,20 @@ first release.
   `run_digest` — which writes them — so a report cannot arrive with two headers.
 
 ### Removed
+
+- **Every model backend but Claude.** Ollama and the Meta Llama API are gone,
+  and with them `langchain-ollama` and `langchain-openai`, the `--claude`,
+  `--ollama`, `--api` and `--backend` commands (`--status` names the model
+  now), `AgentSpec.default_backend`, and the `OLLAMA_*`, `LLAMA_*` and
+  `FALLBACK_BACKEND` settings. There is no fallback model: `ChatAnthropic`
+  retries transient errors itself, and a call that still fails ends the turn
+  with the error in the reply. `ANTHROPIC_API_KEY` is therefore required, and
+  `scout doctor` reports a missing one as a failure rather than a warning.
+  The metrics line loses `backend=` and `answered_by=`, and traces lose the
+  `scout_backend` metadata field. Trace names, tags, sessions and the reply as
+  output are unchanged. Old checkpoints load as they are; the stale
+  `answered_by` key in them is ignored. `docs/technical-report.tex` still
+  describes the three-backend design.
 
 - **LangSmith.** `langsmith` is no longer a declared dependency, `scout doctor`
   no longer has a `langsmith` line, and the `LANGSMITH_` variables are gone from

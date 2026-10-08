@@ -12,7 +12,7 @@ from scout.stats import Totals, parse, render, summarise
 
 LINE = (
     '2026-09-14 03:00:00 INFO scout turn agent="BigTech Agent" thread=U1 '
-    "backend=anthropic answered_by=anthropic outcome=ok seconds=12.4 "
+    "outcome=ok seconds=12.4 "
     "model_calls=3 tool_calls=4 in_tokens=8123 out_tokens=512 usd=0.1600"
 )
 

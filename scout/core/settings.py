@@ -1,13 +1,14 @@
 """Platform configuration, loaded once from ``.env`` and ``.env.<agent>``.
 
-Agent-specific settings (system prompt, tool set, default backend) live on each
+Agent-specific settings (system prompt, tool set) live on each
 ``AgentSpec`` in ``scout/agents/``; this module holds only what all agents share
 — plus the one thing that cannot be shared, the Slack token pair, which comes
 from the per-agent file because each agent is a separate Slack app.
 
 Nothing here raises on import — a missing credential leaves an empty string, so
-the package stays importable (and testable) without a ``.env``. Credentials are
-checked at start-up by ``require_slack_credentials()``.
+the package stays importable (and testable) without a ``.env``. Each entry point
+checks what it needs at start-up: ``require_slack_credentials()`` for the bot,
+``require_digest_config()`` for the digest.
 """
 
 from __future__ import annotations
@@ -19,13 +20,14 @@ from dotenv import dotenv_values, load_dotenv
 
 from .paths import PROJECT_ROOT
 
-_ENV = PROJECT_ROOT / ".env"
+_ENV_FILE = PROJECT_ROOT / ".env"
+_DEFAULT_AGENT = "bigtech"
 
 # --- Active agent ---
 # Which agent this process runs; see scout/agents/. One process per agent.
 # Read before loading ``.env`` — it decides *which* token file layers on top —
 # so peek at the file with dotenv_values rather than mutating the environment.
-ACTIVE_AGENT = os.environ.get("AGENT") or dotenv_values(_ENV).get("AGENT") or "bigtech"
+ACTIVE_AGENT = os.environ.get("AGENT") or dotenv_values(_ENV_FILE).get("AGENT") or _DEFAULT_AGENT
 
 # Each agent is its own Slack app, so each needs its own bot and app token.
 # ``.env.<agent>`` holds that pair; ``.env`` holds everything the agents share.
@@ -33,7 +35,7 @@ ACTIVE_AGENT = os.environ.get("AGENT") or dotenv_values(_ENV).get("AGENT") or "b
 # one wins: real environment > .env.<agent> > .env. That ordering is what keeps
 # the deployed EnvironmentFile authoritative over the rsynced .env.
 load_dotenv(PROJECT_ROOT / f".env.{ACTIVE_AGENT}")
-load_dotenv(_ENV)
+load_dotenv(_ENV_FILE)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -52,6 +54,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a flag from the environment: ``true``/``1``/``yes``/``on``, any case.
+
+    Anything else set is false, which is the readable outcome for a typo in a
+    switch — ``HIDE_CONTENT=ture`` must not read as "hide".
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "1", "yes", "on"}
+
+
 def _env_any(names: Sequence[str], default: str) -> str:
     """The first of ``names`` that is set and non-empty, else ``default``.
 
@@ -66,53 +80,26 @@ def _env_any(names: Sequence[str], default: str) -> str:
     return default
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    """Read a flag from the environment: ``true``/``1``/``yes``/``on``, any case.
-
-    Anything else set is false, which is the readable outcome for a typo in a
-    switch — ``HIDE_CONTENT=ture`` must not read as "hide".
-    """
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"true", "1", "yes", "on"}
-
-
 # --- Slack ---
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")
 
-# --- Anthropic Claude (hosted, the platform default) ---
+# --- Anthropic Claude (the only model Scout runs on) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 ANTHROPIC_MAX_TOKENS = _env_int("ANTHROPIC_MAX_TOKENS", 16000)
-# Thinking depth / token spend: low | medium | high | xhigh | max. "medium" keeps
-# Slack replies snappy across a multi-hop tool loop.
-ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "medium")
-
-# --- Ollama (local) ---
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
-
-# --- Meta Llama API (hosted) ---
-# Reached through Meta's OpenAI-compatible endpoint, so this is a *base* URL and
-# not the full chat-completions path the old hand-rolled POST needed. Replaces
-# LLAMA_API_URL, which is ignored: trimming it would yield a non-compat base
-# that fails at request time instead of here.
-LLAMA_API_KEY = os.environ.get("LLAMA_API_KEY", "")
-LLAMA_MODEL = os.environ.get("LLAMA_MODEL", "Llama-4-Maverick-17B-128E-Instruct-FP8")
-LLAMA_BASE_URL = os.environ.get("LLAMA_BASE_URL", "https://api.llama.com/compat/v1")
-
-# --- Backend selection ---
-# Agents start on Claude and fall back to the local model for one turn when a
-# Claude request fails. With no key there is nothing to fall back *from*, so
-# Ollama becomes the default and the fallback is a no-op.
-DEFAULT_BACKEND = "anthropic" if ANTHROPIC_API_KEY else "ollama"
-FALLBACK_BACKEND = os.environ.get("FALLBACK_BACKEND", "ollama")
+# Thinking depth / token spend: low | medium | high | xhigh | max. Empty sends no
+# effort at all, which Haiku 4.5 requires: it rejects the option. Set it when
+# ANTHROPIC_MODEL names an Opus or Sonnet.
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "")
+# Generous: a long reply at a high effort can take minutes.
+MODEL_REQUEST_TIMEOUT_SECONDS = _env_int("MODEL_REQUEST_TIMEOUT_SECONDS", 300)
 
 # --- Conversation ---
-MAX_TURNS = _env_int("MAX_TURNS", 20)         # message pairs retained per user
-MAX_TOOL_HOPS = _env_int("MAX_TOOL_HOPS", 5)  # tool round-trips per message
+# Question/reply pairs kept in the window sent to the model, per user.
+MAX_TURNS = _env_int("MAX_TURNS", 20)
+# Tool round-trips the model may make while answering one message.
+MAX_TOOL_HOPS = _env_int("MAX_TOOL_HOPS", 5)
 
 # --- Conversation state ---
 # Where LangGraph checkpoints live. Empty (the default) keeps history in memory,
@@ -136,17 +123,27 @@ RESUME_DIR = os.environ.get("RESUME_DIR", "data")
 # See scout/core/referrals.py.
 REFERRALS_FILE = os.environ.get("REFERRALS_FILE", "state/referrals.json")
 
+# --- Shared store ---
+# One SQLite file every agent's process reads and writes: today, the jobs each
+# digest has already sent. A real path by default, for the referral list's
+# reason, and in state/ for the same rsync one. See scout/core/shared_jobs.py.
+SHARED_DB = os.environ.get("SHARED_DB", "state/shared.sqlite")
+
 # --- Daily digest ---
 # Slack user id the scheduled digest DMs (e.g. U012ABCDEF) — yours, not the
 # bot's. Found under your Slack profile, "Copy member ID".
 DIGEST_SLACK_USER = os.environ.get("DIGEST_SLACK_USER", "")
-# How many roles to ask each agent for. Each agent contributes its own section,
-# so the message holds this many per agent, not in total.
-DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 5)
+# Most roles one digest lists. Each agent sends its own DM, so this caps each
+# message, not the total across agents.
+DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 25)
+# Days a job stays hidden from an agent's digest after that digest sent it. Most
+# postings stay open a month or more, so a week would bring the same open role
+# back every week.
+DIGEST_DEDUPE_DAYS = _env_int("DIGEST_DEDUPE_DAYS", 30)
 
 # --- Turn metrics ---
 # Dollars per million tokens, used to price each turn in the metrics line. Left
-# at 0 the line reports tokens only — rates differ per backend and change over
+# at 0 the line reports tokens only — rates differ per model and change over
 # time, so they are configuration rather than a table baked into the code. Fill
 # them from your provider's pricing page to get a usd= field.
 USD_PER_MTOK_IN = _env_float("USD_PER_MTOK_IN", 0.0)
@@ -163,9 +160,7 @@ LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
 # order puts LANGFUSE_BASE_URL ahead of the host passed to the constructor.
 # Reading what it reads means the value doctor reports is the value that gets
 # used — a US-region key pair under a default EU host is otherwise silent.
-LANGFUSE_HOST = _env_any(
-    ("LANGFUSE_BASE_URL", "LANGFUSE_HOST"), "https://cloud.langfuse.com"
-)
+LANGFUSE_HOST = _env_any(("LANGFUSE_BASE_URL", "LANGFUSE_HOST"), "https://cloud.langfuse.com")
 # Separates the deployed box from a laptop pointed at the same project. Empty
 # leaves the SDK's own default, which is "default".
 LANGFUSE_ENVIRONMENT = _env_any(("LANGFUSE_ENVIRONMENT", "LANGFUSE_TRACING_ENVIRONMENT"), "")
@@ -179,14 +174,12 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = _env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
 LOG_BACKUP_COUNT = _env_int("LOG_BACKUP_COUNT", 3)
 
-# --- Model HTTP requests ---
-# Generous: generation on a local Ollama model can take minutes.
-MODEL_REQUEST_TIMEOUT_SECONDS = _env_int("MODEL_REQUEST_TIMEOUT_SECONDS", 300)
-
 # --- Tool HTTP requests ---
 TOOL_USER_AGENT = "Mozilla/5.0 (Macintosh) AppleWebKit/537.36"
-TOOL_REQUEST_TIMEOUT_SECONDS = _env_int("TOOL_REQUEST_TIMEOUT_SECONDS", 30)  # job APIs
-GEO_REQUEST_TIMEOUT_SECONDS = _env_int("GEO_REQUEST_TIMEOUT_SECONDS", 10)    # ip-api
+# Job board APIs.
+TOOL_REQUEST_TIMEOUT_SECONDS = _env_int("TOOL_REQUEST_TIMEOUT_SECONDS", 30)
+# The IP geolocation lookup (ip-api).
+GEO_REQUEST_TIMEOUT_SECONDS = _env_int("GEO_REQUEST_TIMEOUT_SECONDS", 10)
 
 
 #: What each entry point cannot start without. ``scout doctor`` reports the same
@@ -203,6 +196,9 @@ def missing_for(required: Sequence[str]) -> list[str]:
     operator does and read whatever the process actually has. An unknown name
     raises rather than reporting itself missing, which would be a typo quietly
     turning into a start-up failure.
+
+    Args:
+        required: Setting names, as they appear in ``.env``.
     """
     configured = globals()
     return [name for name in required if not configured[name]]

@@ -13,7 +13,7 @@ shared: one graph, one runtime, one Slack adapter.
 - [How it is tested](#how-it-is-tested)
 
 <div align="center">
-  <img src="../assets/sys.png" alt="Scout system architecture: Slack DM, the SlackBot adapter, the ConversationalAgent seam, the two LangGraph agent graphs, the model backends and tool registry, with state, scheduled jobs, and deployment beneath" width="100%">
+  <img src="../assets/sys.png" alt="Scout system architecture: Slack DM, the SlackBot adapter, the ConversationalAgent seam, the two LangGraph agent graphs, Claude and the tool registry, with state, scheduled jobs, and deployment beneath" width="100%">
 </div>
 
 ## The path of a message
@@ -22,20 +22,20 @@ shared: one graph, one runtime, one Slack adapter.
 Slack DM
    │
    ▼
-scout/slack/bot.py ────── SlackBot: DM filtering + text commands (--claude, --reset, …)
+scout/slack/bot.py ────── SlackBot: DM filtering + text commands (--status, --reset, …)
    │  talks only to ConversationalAgent, so it needs no graph knowledge
    ▼
 scout/core/runner.py ──── GraphRunner: one checkpointer thread per user (that
-   │                      thread is their history) + their chosen model
+   │                      thread is their history) + a per-user lock
    │
    │ (model request)          │ (tool calls)          ▲ declared by
    ▼                          ▼                       │
 scout/core/models.py     scout/tools/ ─ ToolRegistry   scout/agents/*.py (AgentSpec)
-   ├── ChatAnthropic        ├── clock.py         get_current_time, get_current_date
-   ├── ChatOllama           ├── location.py      get_location
-   └── ChatOpenAI           ├── resume.py        get_resume_profile
-       (Llama, OpenAI-      ├── referrals.py     add_/remove_/list_referrals
-        compatible)         ├── referrals_read.py  list_referrals (read-only view)
+   └── ChatAnthropic        ├── clock.py         get_current_time, get_current_date
+       (Claude, the only    ├── location.py      get_location
+        model)              ├── resume.py        get_resume_profile
+                            ├── referrals.py     add_/remove_/list_referrals
+                            ├── referrals_read.py  list_referrals (read-only view)
                             ├── referral_jobs.py   search_referral_jobs (the list
                             │                      as a search scope)
                             └── jobs/            one module per source, over
@@ -100,12 +100,12 @@ router skips the parse on every later turn, and `--reset` drops it.
 ```mermaid
 flowchart TB
     subgraph slack["scout/slack/bot.py"]
-        DM["Slack DM<br/>(channel_type == im)"] --> CMD{"--claude / --ollama /<br/>--llama / --reset / --help?"}
-        CMD -- yes --> LOCAL["set_backend / reset<br/>reply directly"]
+        DM["Slack DM<br/>(channel_type == im)"] --> CMD{"--status / --reset /<br/>--help?"}
+        CMD -- yes --> LOCAL["model label / reset<br/>reply directly"]
         CMD -- no --> LOCK["per-user lock<br/>GraphRunner.respond(user_id, text)"]
     end
 
-    LOCK --> CFG["config: thread_id=user_id,<br/>backend=user choice,<br/>recursion_limit = 2·MAX_TOOL_HOPS−1"]
+    LOCK --> CFG["config: thread_id=user_id,<br/>recursion_limit = 2·MAX_TOOL_HOPS−1"]
 
     CFG --> TAILOR{"spec.tailor_with_resume?"}
 
@@ -132,8 +132,7 @@ flowchart TB
         TC -- none --> G1([END])
     end
 
-    M -. "invoke fails" .-> FB["retry on FALLBACK_BACKEND<br/>(node raises ⇒ commits nothing)"]
-    FB --> M
+    M -. "Claude call fails" .-> ERR["turn raises; Slack replies with the error<br/>(node raises ⇒ commits nothing)"]
 
     G1 --> OUT["reply text → Slack<br/>(split at MAX_MESSAGE_CHARS)"]
     LOOP -. "GraphRecursionError" .-> GIVEUP["_give_up: answer abandoned<br/>tool calls + record STUCK_REPLY"]
@@ -149,20 +148,20 @@ Three interfaces hold the layers apart. They are the reason a change is usually
 one file.
 
 **`AgentSpec`** — declares an agent: key, display name, system prompt, tool
-modules, default backend, and whether to tailor to the résumé. Adding an agent
+modules, and whether to tailor to the résumé. Adding an agent
 must not touch the graph.
 
 **`ConversationalAgent`** — everything `scout/slack/` knows about an agent:
-`respond`, `reset`, the backend accessors, `tool_names`. `GraphRunner`
+`respond`, `reset`, `tool_names`. `GraphRunner`
 implements it once, for both a plain `Agent` and the two-stage
 `ResumeTailoredAgent`, which is why the adapter has no special cases. Nothing in
 the Slack layer reaches past it.
 
-**LangChain chat models** — one provider per builder in `scout/core/models.py`,
-built on first use. Adding a provider is one function plus one entry in
-`_BUILDERS`. Because history is stored as provider-agnostic message objects,
-each integration renders the same conversation into its own wire format — which
-is what lets a user switch model mid-conversation.
+**`scout/core/models.py`** — the one module that knows the model is Claude:
+`ChatAnthropic`, built on first use so a missing key cannot stop the process
+starting. The graph sees a LangChain chat model with tools bound and nothing
+more. Anthropic is the only backend by decision, so there is no provider
+registry, no per-user model switch and no fallback model.
 
 ## Project layout
 
@@ -172,16 +171,17 @@ is what lets a user switch model mid-conversation.
 | `run.py` | `python run.py` — the same thing as `scout run`, kept for the systemd units |
 | `scout/core/agent.py` | `AgentSpec`, `AgentState`, `ConversationalAgent`, the graph builder |
 | `scout/core/runner.py` | `GraphRunner`, `Agent` — driving a compiled graph for many users |
-| `scout/core/models.py` | One LangChain chat model per backend, built lazily |
+| `scout/core/models.py` | The Claude chat model (`ChatAnthropic`), built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral store — JSON in `state/`, keyed by user |
+| `scout/core/shared_jobs.py` | The shared store — SQLite in `state/`: what each digest has sent |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/core/tracing.py` | Langfuse: the per-turn call tree, and the only module that knows it exists |
 | `scout/core/paths.py` | Filesystem paths, free of config dependencies |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/tools/` | `ToolRegistry` plus the tool modules |
-| `scout/tools/jobs/` | One module per job source, over shared parts (`fetch`, `feeds`, `posting`, `relevance`, `hosted_board`); `directory.py` the company-to-board map |
+| `scout/tools/jobs/` | One module per job source, over shared parts (`fetch`, `feeds`, `posting`, `relevance`, `hosted_board`, `unsent`); `directory.py` the company-to-board map |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | Splitting a reply into Slack-sized messages |
@@ -196,9 +196,9 @@ is what lets a user switch model mid-conversation.
 | Decision | Why |
 |---|---|
 | **One seam, `ConversationalAgent`** | The Slack layer codes against an interface, so a single agent and the résumé-tailored pipeline take the same path with zero special cases. |
-| **History *is* the checkpointer thread** | Provider-agnostic LangChain messages, one thread per user — which is what lets someone switch models mid-conversation without losing context. |
+| **History *is* the checkpointer thread** | LangChain messages, one thread per user, which `ChatAnthropic` renders into the API's format on every call. |
 | **A hop limit that repairs itself** | When a turn exhausts its tool budget, the abandoned tool calls are answered before the apology is recorded. Skipping that breaks the user's *next* message, not just this one. |
-| **Retry inside the model node** | A node that raises commits nothing, so the fallback starts clean while keeping tool results the turn already fetched. |
+| **One model, no fallback** | Claude is the only backend. `ChatAnthropic` retries transient errors itself; a call that still fails ends the turn, and because a node that raises commits nothing, the thread keeps the tool results already fetched. |
 | **Tools never raise on expected failure** | A dead job board returns a sentence the model can read and act on, not a stack trace. |
 | **One module per job source** | The platforms differ too much to share an implementation: a JSON search API, a board API, Workday, RSS, a scraped page. What they *do* share is split by job into `fetch`, `feeds`, `posting` and `relevance`, and a platform that hosts many companies is one shape rather than one module each — `HostedBoard` for Greenhouse, Ashby and SmartRecruiters, `WorkdayTenant` for the Workday sites. |
 | **The digest derives its agents** | `in_digest` is the marker, so a new job agent joins tomorrow's digest by existing. There is no second registry to keep in step. It is its own flag rather than a read of `tailor_with_resume`: the Referral Window searches a scope instead of a résumé, and still has a morning report. |
@@ -211,16 +211,17 @@ is what lets a user switch model mid-conversation.
 Each of these has a test. If you find yourself deleting one, read the entry
 first — most of them exist because the alternative broke something subtle.
 
-- **`trim_messages(..., start_on="human")` is load-bearing.** Providers reject a
+- **`trim_messages(..., start_on="human")` is load-bearing.** The API rejects a
   conversation that opens on the assistant's side, and a tool result must never
   lead the window or be split from the call it answers.
 - **`bind_tools` discards kwargs bound before it.** In `models.with_tools`, the
-  provider options go on *after* the tools or they vanish silently.
+  request options go on *after* the tools or they vanish silently.
 - **The hop limit repairs the thread.** On `GraphRecursionError`, `_give_up`
   answers the abandoned tool calls before recording the apology.
 - **A subgraph is handed the recursion limit afresh**, so `_min_steps` is a
   floor, never an addition — adding to it hands the inner loop extra tool hops.
-- **The fallback retry lives in the model node**, not around the turn.
+- **A failed model call fails the turn**, and leaves the thread usable for the
+  next message.
 - **The annotation `RunnableConfig` must stay exactly that.** Widening it to
   `RunnableConfig | None` stops LangChain recognising it: the injection quietly
   stops and `config` reappears as a parameter the model is asked to fill — with
@@ -248,6 +249,11 @@ first — most of them exist because the alternative broke something subtle.
 - **The digest runs on `digest:<key>` threads, which are not people.**
   `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
   looks up a user id that has no referrals and quietly stops ranking by them.
+- **What a digest sent is in the shared store, not its thread.** Every job tool
+  renders through `unsent.render_unsent`, which in a digest turn hides what that
+  agent sent within `DIGEST_DEDUPE_DAYS` before the model sees it; the digest
+  records the postings its DM links to, after the post. The thread holds nothing
+  the next run needs, so the digest resets it every run.
 - **Two bots on one `CHECKPOINT_DB` share a thread.** Thread ids are the bare
   Slack user id, so each interactive agent needs its own database path.
 - **`settings` must not raise on import.** That is what keeps the package
@@ -262,9 +268,9 @@ first — most of them exist because the alternative broke something subtle.
 The suite runs in about a second, with no network, no credentials, and no
 `.env`:
 
-- **Chat models are scripted.** `ScriptedModel` in `tests/conftest.py` is
-  installed into `scout.core.models` as a real backend, so the graph reaches it
-  through `build`/`with_tools`/`label` exactly as it reaches Claude. It records
+- **The chat model is scripted.** `ScriptedModel` in `tests/conftest.py` is
+  installed into `scout.core.models` in place of Claude, so the graph reaches it
+  through `build`/`with_tools` exactly as it reaches the real one. It records
   every message list it was handed, which is how the instructions, the trimming,
   and the tool results are asserted.
 - **HTTP is stubbed.** `FakeRequests` stands in for the `requests` module and
