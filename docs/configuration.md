@@ -98,7 +98,7 @@ the box's list with a laptop's.
 | Variable | Default | Notes |
 |---|---|---|
 | `DIGEST_SLACK_USER` | — | Your Slack member id (profile → **Copy member ID**) — yours, not the bot's. Required by `scout digest`. |
-| `DIGEST_MAX_ROLES` | `5` | Roles asked of each agent, so the message holds this many *per section*. |
+| `DIGEST_MAX_ROLES` | `25` | Roles asked of each agent, so the message holds this many *per section*. |
 
 `DIGEST_SLACK_USER` does double duty: digest threads are not people, so it is
 also the owner whose referral list a digest turn reads.

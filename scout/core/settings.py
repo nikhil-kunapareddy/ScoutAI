@@ -121,9 +121,9 @@ REFERRALS_FILE = os.environ.get("REFERRALS_FILE", "state/referrals.json")
 # Slack user id the scheduled digest DMs (e.g. U012ABCDEF) — yours, not the
 # bot's. Found under your Slack profile, "Copy member ID".
 DIGEST_SLACK_USER = os.environ.get("DIGEST_SLACK_USER", "")
-# How many roles to ask each agent for. Each agent contributes its own section,
-# so the message holds this many per agent, not in total.
-DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 5)
+# Most roles one digest lists. Each agent sends its own DM, so this caps each
+# message, not the total across agents.
+DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 25)
 
 # --- Turn metrics ---
 # Dollars per million tokens, used to price each turn in the metrics line. Left
