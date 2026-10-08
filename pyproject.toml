@@ -38,7 +38,7 @@ dependencies = [
     "langchain-core>=1.6.3",
     "langchain-anthropic>=1.7.2",
     "requests>=2.31.0",
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.4",
     "pypdf>=6.18.1",
     # Agent observability: the per-turn call tree, wired up in core/tracing.py.
     # `langchain` is not imported anywhere in this package — langfuse's LangChain
