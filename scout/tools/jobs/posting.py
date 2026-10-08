@@ -33,6 +33,20 @@ class JobPosting:
     date: datetime | None = None
     #: The source's own wording, when it doesn't.
     posted_label: str = ""
+    #: The source's own id for the opening, namespaced by ``source_id``.
+    job_id: str = ""
+
+    @property
+    def key(self) -> str | None:
+        """What a digest remembers this opening by, or None if nothing is stable.
+
+        The source's id where it has one, the link where it doesn't. A posting
+        with neither can't be told from the next one, so it is never hidden and
+        never recorded.
+        """
+        if self.job_id:
+            return self.job_id
+        return f"url:{self.url}" if self.url else None
 
     @property
     def sort_key(self) -> float:
@@ -61,6 +75,16 @@ Searcher = Callable[[str, int], list[JobPosting] | None]
 #: One query's results, each paired with the id it de-dupes on. ``None`` means
 #: that query never reached the source.
 QueryResults = list[tuple[str, JobPosting]] | None
+
+
+def source_id(source: str, native: object) -> str:
+    """A ``job_id`` namespaced by source, e.g. ``amazon:2876543``, or "" without one.
+
+    The prefix keeps two sources' ids apart: Oracle's 344271 and another board's
+    344271 are different openings.
+    """
+    text = str(native or "").strip()
+    return f"{source}:{text}" if text else ""
 
 
 def clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:

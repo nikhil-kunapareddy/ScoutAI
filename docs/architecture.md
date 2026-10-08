@@ -175,12 +175,13 @@ registry, no per-user model switch and no fallback model.
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral store — JSON in `state/`, keyed by user |
+| `scout/core/shared_jobs.py` | The shared store — SQLite in `state/`: what each digest has sent |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/core/tracing.py` | Langfuse: the per-turn call tree, and the only module that knows it exists |
 | `scout/core/paths.py` | Filesystem paths, free of config dependencies |
 | `scout/core/logging_config.py` | Console + rotating-file logging |
 | `scout/tools/` | `ToolRegistry` plus the tool modules |
-| `scout/tools/jobs/` | One module per job source, over shared parts (`fetch`, `feeds`, `posting`, `relevance`, `hosted_board`); `directory.py` the company-to-board map |
+| `scout/tools/jobs/` | One module per job source, over shared parts (`fetch`, `feeds`, `posting`, `relevance`, `hosted_board`, `unsent`); `directory.py` the company-to-board map |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | Splitting a reply into Slack-sized messages |
@@ -248,6 +249,11 @@ first — most of them exist because the alternative broke something subtle.
 - **The digest runs on `digest:<key>` threads, which are not people.**
   `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
   looks up a user id that has no referrals and quietly stops ranking by them.
+- **What a digest sent is in the shared store, not its thread.** Every job tool
+  renders through `unsent.render_unsent`, which in a digest turn hides what that
+  agent sent within `DIGEST_DEDUPE_DAYS` before the model sees it; the digest
+  records the postings its DM links to, after the post. The thread holds nothing
+  the next run needs, so the digest resets it every run.
 - **Two bots on one `CHECKPOINT_DB` share a thread.** Thread ids are the bare
   Slack user id, so each interactive agent needs its own database path.
 - **`settings` must not raise on import.** That is what keeps the package

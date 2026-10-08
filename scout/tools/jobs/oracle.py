@@ -22,6 +22,8 @@ from __future__ import annotations
 from datetime import datetime
 from urllib.parse import quote
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -29,10 +31,11 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 API_URL = (
     "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
@@ -51,7 +54,10 @@ API_PAGE_SIZE = 200
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_oracle_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_oracle_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Oracle's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -68,9 +74,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -132,6 +139,7 @@ def _to_posting(job: dict) -> JobPosting | None:
         url=f"{JOB_BASE_URL}/{job_id}" if job_id else "",
         location=(job.get("PrimaryLocation") or "").strip(),
         date=_parse_posted(job.get("PostedDate")),
+        job_id=source_id("oracle", job_id),
     )
 
 

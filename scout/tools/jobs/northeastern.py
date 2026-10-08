@@ -7,10 +7,13 @@ there is nothing to sort on and the order is left as Workday gave it.
 
 from __future__ import annotations
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
-from .posting import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int, render_postings
+from .posting import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int
 from .relevance import is_excluded
+from .unsent import render_unsent
 
 #: The parts of the Workday CXS endpoint, POST https://{host}/wday/cxs/{tenant}/{site}/jobs.
 HOST = "northeastern.wd1.myworkdayjobs.com"
@@ -27,7 +30,10 @@ API_PAGE_SIZE = 20
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_northeastern_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_northeastern_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Northeastern University's careers site for recent job openings
         and return each role's title, location, date posted, and link.
 
@@ -44,7 +50,11 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(f"*Latest {ORGANIZATION} roles — {{count}} found:*", postings)
+        return render_unsent(
+            f"*Latest {ORGANIZATION} roles — {{count}} found:*",
+            postings,
+            config=config,
+        )
 
 
 def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] | None:

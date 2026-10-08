@@ -21,6 +21,8 @@ from __future__ import annotations
 from datetime import datetime
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -31,10 +33,11 @@ from .posting import (
     clamp_int,
     merge_queries,
     parse_unix_timestamp,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 SEARCH_URL = "https://apply.careers.microsoft.com/api/pcsx/search"
 JOB_BASE_URL = "https://apply.careers.microsoft.com"
@@ -52,7 +55,10 @@ PAGES = 2
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_microsoft_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_microsoft_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Microsoft's careers site for recent US job openings relevant to
         the user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -69,9 +75,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -141,6 +148,7 @@ def _to_posting(job: dict) -> JobPosting | None:
         url=JOB_BASE_URL + path if path else "",
         location=_location_text(job.get("standardizedLocations")),
         date=_parse_posted(job.get("postedTs")),
+        job_id=source_id("microsoft", job.get("displayJobId") or job.get("id")),
     )
 
 

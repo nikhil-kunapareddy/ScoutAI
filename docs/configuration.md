@@ -81,17 +81,19 @@ conversations into a single history. The digest is already safe: it uses
 `digest:<key>` threads.
 
 With `CHECKPOINT_DB` set, a changed résumé needs a `--reset` to take effect —
-the cached profile outlives the process too.
+the cached profile outlives the process too. The digest resets its own thread at
+the start of every run, so it picks up a new résumé the next morning.
 
-## Résumé and referrals
+## Résumé, referrals and the shared store
 
 | Variable | Default | Notes |
 |---|---|---|
 | `RESUME_DIR` | `data` | The folder holding `resume.pdf`, the one file the Resume Parser reads. Relative to the project root, so a clone needs nothing here; set it if you installed the package instead of cloning. |
 | `REFERRALS_FILE` | `state/referrals.json` | The referral list. Unlike `CHECKPOINT_DB` this has a real default: history is disposable, a list you typed by hand is not. |
+| `SHARED_DB` | `state/shared.sqlite` | One SQLite file every agent's process shares. Today it holds the jobs each digest has sent, so the next one can skip them. A real default, for the referral list's reason. |
 
 `state/` is excluded from `deploy.sh`'s rsync, so a redeploy cannot overwrite
-the box's list with a laptop's.
+the box's list or shared store with a laptop's.
 
 ## Daily digest
 
@@ -99,6 +101,7 @@ the box's list with a laptop's.
 |---|---|---|
 | `DIGEST_SLACK_USER` | — | Your Slack member id (profile → **Copy member ID**) — yours, not the bot's. Required by `scout digest`. |
 | `DIGEST_MAX_ROLES` | `25` | Roles asked of each agent, so the message holds this many *per section*. |
+| `DIGEST_DEDUPE_DAYS` | `30` | Days a job stays out of an agent's digest after that digest sent it. Most postings stay open a month or more, so a week would bring the same role back every week. |
 
 `DIGEST_SLACK_USER` does double duty: digest threads are not people, so it is
 also the owner whose referral list a digest turn reads.

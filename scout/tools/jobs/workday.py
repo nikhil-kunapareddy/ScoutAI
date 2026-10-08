@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -40,9 +42,10 @@ from .posting import (
     Searcher,
     clamp_int,
     merge_queries,
-    render_postings,
+    source_id,
 )
 from .relevance import is_ai_ml_role, search_queries
+from .unsent import render_unsent
 
 #: Workday rejects a page larger than this with a 400.
 API_PAGE_SIZE = 20
@@ -122,10 +125,17 @@ class WorkdayTenant:
             location=(job.get("locationsText") or "").strip(),
             # Relative ("Posted 6 Days Ago"), not a date.
             posted_label=(job.get("postedOn") or "").strip(),
+            job_id=source_id(f"workday:{self.tenant}", _requisition(job)),
         )
 
-    def answer(self, keywords: str, limit: int) -> str:
-        """The reply a tool returns: the roles, or which gap it hit."""
+    def answer(self, keywords: str, limit: int, config: RunnableConfig) -> str:
+        """The reply a tool returns: the roles, or which gap it hit.
+
+        Args:
+            keywords: As the tool was given them.
+            limit: As the tool was given it.
+            config: The tool's run config; see ``unsent.render_unsent``.
+        """
         postings = self.search(keywords, limit)
         if postings is None:
             return f"Couldn't reach {self.organization}'s careers site right now. Try again later."
@@ -134,10 +144,11 @@ class WorkdayTenant:
                 f"No relevant {self.organization} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {self.organization} AI/ML roles — {{count}} found:*",
             postings,
             footer=f"_{self.organization} publishes how long ago a role went up, not a date._",
+            config=config,
         )
 
 
@@ -148,10 +159,15 @@ def _req_id(job: dict, posting: JobPosting) -> str:
     the fallback, because a row Scout cannot identify must not silently collapse
     into another one.
     """
+    return _requisition(job) or posting.url or posting.title
+
+
+def _requisition(job: dict) -> str:
+    """The requisition id in ``bulletFields`` ("JR2024968"), or "" if there isn't one."""
     fields = job.get("bulletFields")
     if isinstance(fields, list) and fields and isinstance(fields[0], str):
         return fields[0]
-    return posting.url or posting.title
+    return ""
 
 
 #: Tenant key -> its site. Adding a company is a line here. All verified live.
@@ -202,7 +218,10 @@ def _tenant_for(company: str) -> WorkdayTenant | None:
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_workday_jobs(company: str, keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_workday_jobs(  # noqa: D417
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search a big-tech company's Workday careers site for US AI/ML job
         openings and return each role's title, location, and link.
 
@@ -219,4 +238,4 @@ def register(reg: ToolRegistry) -> None:
         if site is None:
             supported = ", ".join(sorted(TENANTS))
             return f"Unknown company '{company}'. Supported Workday companies: {supported}."
-        return site.answer(keywords, limit)
+        return site.answer(keywords, limit, config)

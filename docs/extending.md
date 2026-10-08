@@ -23,7 +23,9 @@ Reuse the shared parts, importing each from the module that owns it:
 | `fetch` | `post_rows(url, key, payload)` | The same where the query goes in the body (Workday) |
 | `feeds` | `items(feed)`, `tag_text(item, tag)` | Reading an RSS feed |
 | `posting` | `JobPosting` | The normalised posting every source produces |
+| `posting` | `source_id(source, native)` | A posting's `job_id`, e.g. `acme:123`; `""` when the source has none |
 | `posting` | `render_postings(header, postings)` | The one Slack output format |
+| `unsent` | `render_unsent(header, postings, config=config)` | What a tool returns: `render_postings`, minus what a digest already sent |
 | `posting` | `merge_queries(queries, postings_for)` | Run several queries at one source and de-dupe |
 | `posting` | `take_newest(postings, limit)` | Sort newest-first and cut |
 | `posting` | `clamp_int(value, default, min, max)` | Bounds a schema can't express (`days=0`, `limit=999`) |
@@ -40,6 +42,8 @@ testable without touching `requests` at all.
 
 from __future__ import annotations
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -47,10 +51,11 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 SEARCH_URL = "https://acme.com/api/jobs"
 ORGANIZATION = "Acme"
@@ -58,7 +63,10 @@ ORGANIZATION = "Acme"
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_acme_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_acme_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Acme's careers site for recent US AI/ML openings.
 
         Args:
@@ -70,8 +78,10 @@ def register(reg: ToolRegistry) -> None:
             return f"Couldn't reach {ORGANIZATION}'s careers board right now. Try again later."
         if not postings:
             return f"No relevant {ORGANIZATION} roles found right now. Try adjusting your keywords."
-        return render_postings(
-            f"*Latest {ORGANIZATION} AI/ML roles — {{count}} found:*", postings
+        return render_unsent(
+            f"*Latest {ORGANIZATION} AI/ML roles — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 
@@ -98,13 +108,23 @@ def _to_posting(row: dict) -> JobPosting | None:
     title = (row.get("title") or "").strip()
     if not is_ai_ml_role(title):
         return None
-    return JobPosting(title=title, organization=ORGANIZATION, url=row.get("url", ""))
+    return JobPosting(
+        title=title,
+        organization=ORGANIZATION,
+        url=row.get("url", ""),
+        job_id=source_id("acme", row.get("id")),
+    )
 ```
 
 Note the two halves. The registered tool returns Slack text; `search` returns the
 postings and matches `Searcher`, which is what lets the Referral Window search
 this source alongside seven others. `None` from `search` means *unreachable* and
 is never the same answer as `[]`.
+
+The tool renders through `render_unsent`, passing the `config` LangChain injects,
+so a digest never shows a role it already sent. Give each posting a `job_id`
+with `source_id` when the source has an id of its own; without one, the posting
+is remembered by its link.
 
 Then add the module to an agent's `tool_modules` (`scout/agents/bigtech.py`),
 and a test in `tests/test_job_sources.py` using `call_tool` and `FakeRequests`:

@@ -59,13 +59,14 @@ which a merge does not carry. See the AWS section of docs/deployment.md.
 | `scout/core/models.py` | The Claude chat model (`ChatAnthropic`), built lazily |
 | `scout/core/settings.py` | All shared config, from `.env` + `.env.<agent>` |
 | `scout/tools/` | `ToolRegistry` + tool modules (`clock`, `location`, `resume`, `referrals`) |
-| `scout/tools/jobs/` | One module per job source, over shared parts: `fetch` (HTTP), `feeds` (RSS), `posting` (the record, merging, rendering), `relevance` (which titles count), `hosted_board` (the Greenhouse/Ashby shape), `directory` (company → board) |
+| `scout/tools/jobs/` | One module per job source, over shared parts: `fetch` (HTTP), `feeds` (RSS), `posting` (the record, merging, rendering), `relevance` (which titles count), `hosted_board` (the Greenhouse/Ashby shape), `directory` (company → board), `unsent` (what a digest already sent, hidden) |
 | `scout/agents/` | One `AgentSpec` per agent, plus `resume_tailored.py` (the orchestration) |
 | `scout/slack/bot.py` | Slack adapter; talks only to `ConversationalAgent` |
 | `scout/slack/formatting.py` | `split_message`, shared by the bot and `notify` |
 | `scout/slack/notify.py` | Opening a DM nobody asked for (digest, alerts) |
 | `scout/core/checkpoints.py` | In-memory or SQLite checkpointer, per `CHECKPOINT_DB` |
 | `scout/core/referrals.py` | The referral list store — JSON in `state/`, keyed by user |
+| `scout/core/shared_jobs.py` | The shared store — SQLite in `state/` every process opens: what each digest has sent |
 | `scout/core/metrics.py` | The one-line-per-turn record |
 | `scout/core/tracing.py` | Langfuse — the per-turn call tree; the only module that imports it |
 | `scout/digest.py`, `stats.py`, `alert.py` | Scheduled entry points, read back, failure DM |
@@ -137,6 +138,12 @@ Three seams hold the layers apart — keep them intact:
   the tool is a thin renderer over. `None` means the source was unreachable and
   is never the same answer as `[]`. If the source is a company board, add it to
   `jobs/directory.py` so a referral there is searchable.
+- **A job tool renders through `unsent.render_unsent(..., config=config)`**, never
+  `render_postings` directly, so it takes `*, config: RunnableConfig` like the
+  referral tools. That is what keeps a digest from showing a role it already
+  sent. Give each posting `job_id=source_id("<source>", <native id>)` where the
+  source has an id; without one, a posting is remembered by its link.
+  `test_no_job_tool_asks_the_model_for_its_config` guards the schema.
 - **Tools never raise for an expected failure** (site down, no results). Return a
   sentence the model can read and act on. Argument *types* are now LangChain's
   problem — see below.
@@ -222,6 +229,14 @@ Three seams hold the layers apart — keep them intact:
   is completeness, and a silently short list is the one way to break it. That is
   why company-to-board routing is a table in `jobs/directory.py` rather than
   something the model is asked to get right.
+- **What a digest sent is in the shared store, not its thread.** In a digest
+  turn, `render_unsent` drops what that agent sent within `DIGEST_DEDUPE_DAYS`
+  before the model sees it; after the DM is posted — never before — the digest
+  records the postings whose links the DM carries, so only the model's picks
+  count. The thread then holds nothing the next run needs, and `_request_report`
+  resets it every run. A store that can't be read or written costs a repeat,
+  never the digest: `SharedJobsError` becomes a footer note or a log line.
+  Records are per agent, `(agent, job_id)`.
 - **The digest runs on `digest:<key>` threads, which are not people.**
   `owner_for` maps them onto `DIGEST_SLACK_USER`; without that the daily report
   looks up a user id that has no referrals and quietly stops ranking by them.
@@ -275,8 +290,9 @@ which is the point of them all going through `fetch`.
 
 A test must not depend on the developer's own `.env` or `data/` either: point
 `settings` at a `tmp_path` (see `tests/test_checks.py`), or it passes here and
-fails in CI. Coverage is 100% of statements *and* branches, and `fail_under`
-holds it there; CI runs 3.10–3.13.
+fails in CI. The autouse `shared_db` fixture in `conftest.py` does this for
+`SHARED_DB`, since every digest test writes to the store. Coverage is 100% of
+statements *and* branches, and `fail_under` holds it there; CI runs 3.10–3.13.
 
 The suite also pins `LANGSMITH_TRACING=false` (`tests/conftest.py`). Scout
 dropped LangSmith, but `langsmith` still arrives with `langchain-core` and reads

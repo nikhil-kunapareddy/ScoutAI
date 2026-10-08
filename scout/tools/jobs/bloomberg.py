@@ -22,6 +22,8 @@ import html
 import re
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -31,9 +33,9 @@ from .posting import (
     QueryResults,
     clamp_int,
     merge_queries,
-    render_postings,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 SEARCH_URL = "https://bloomberg.avature.net/careers/SearchJobs/"
 ORGANIZATION = "Bloomberg"
@@ -59,7 +61,10 @@ _LOCATION_RE = re.compile(r'<span class="list-item-location">(.*?)</span>', re.S
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_bloomberg_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_bloomberg_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Bloomberg's careers site for US job openings relevant to the
         user's field (AI/ML engineering) and return each role's title and link.
 
@@ -79,10 +84,11 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles — {{count}} found:*",
             postings,
             footer="_Bloomberg doesn't publish posting dates._",
+            config=config,
         )
 
 

@@ -51,6 +51,15 @@ settings.LANGFUSE_PUBLIC_KEY = ""
 settings.LANGFUSE_SECRET_KEY = ""
 
 
+@pytest.fixture(autouse=True)
+def shared_db(tmp_path, monkeypatch):
+    """Every test gets its own shared store, so none writes to the developer's
+    ``state/shared.sqlite`` — the digest records what it sent on every run."""
+    path = tmp_path / "shared.sqlite"
+    monkeypatch.setattr(settings, "SHARED_DB", str(path))
+    return path
+
+
 class ScriptedModel(BaseChatModel):
     """A chat model that replays a canned list of ``AIMessage``s.
 

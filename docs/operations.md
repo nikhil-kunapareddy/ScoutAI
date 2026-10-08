@@ -31,12 +31,39 @@ two answer different questions — the Referral Window searches a scope rather
 than a résumé, and still has something to say every morning.
 
 Each agent runs on its own thread (`digest:<key>`), kept apart from the threads
-the Slack bot uses. Two things follow. The digest never eats into your chat
-history's `MAX_TURNS` window — ask the bot something right afterwards and it has
-no idea one happened. And because the thread persists (given `CHECKPOINT_DB`),
-each agent can see what it reported on previous days and skip repeats. That
-thread memory is the only dedupe available here: agents return prose, not the
-structured `JobPosting` objects their tools built.
+the Slack bot uses, so the digest never eats into your chat history's
+`MAX_TURNS` window — ask the bot something right afterwards and it has no idea
+one happened.
+
+### No repeats
+
+What a digest sent is recorded in the shared store (`SHARED_DB`), not left to
+the model's memory:
+
+```
+ search boards ──▶ drop jobs this agent sent in the last DIGEST_DEDUPE_DAYS
+               ──▶ Claude ranks what's left ──▶ Slack DM
+               ──▶ record the jobs whose links the DM carries
+```
+
+Every job tool renders through `tools/jobs/unsent.py`. In a digest turn it
+removes each posting the agent already sent before the model sees the list, so a
+repeat can't happen rather than being asked not to. Only the model's picks are
+recorded, by matching the DM's links to what it was shown — a role it ranked out
+today is still new tomorrow. A job is known by its source's id (`amazon:2876543`)
+or, where the source has none, by its link. Each agent keeps its own record:
+BigTech and the Referral Window can both send the same Stripe role.
+
+Because the thread no longer carries anything the next run needs, it is reset at
+the start of every run. That also means a changed résumé is parsed again the
+next morning.
+
+To see what an agent has sent:
+
+```bash
+sqlite3 state/shared.sqlite \
+  "SELECT shared_at, title, company FROM shared_jobs WHERE agent = 'bigtech' ORDER BY shared_at DESC LIMIT 25"
+```
 
 ### What it looks like
 
@@ -58,8 +85,8 @@ Searched all 22 boards. Bloomberg gives no posting dates; Cisco was unreachable.
 ```
 
 The layout is asked for rather than rendered, because what an agent returns is
-prose — the structured `JobPosting` objects its tools built are gone by then,
-which is the same reason the thread is the only dedupe. The fields themselves
+prose — the structured `JobPosting` objects its tools built are gone by then.
+The fields themselves
 were already identical across every source, from `render_postings`; pinning the
 request is what stops the *report* drifting between days.
 Two rules in it earn their place: repeat the tool's date word for word (Workday

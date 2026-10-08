@@ -23,6 +23,8 @@ import re
 from datetime import datetime
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -33,10 +35,11 @@ from .posting import (
     clamp_int,
     merge_queries,
     parse_iso_timestamp,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 SEARCH_URL = "https://jobs.apple.com/en-us/search"
 JOB_BASE_URL = "https://jobs.apple.com/en-us/details"
@@ -57,7 +60,10 @@ _STATE_RE = re.compile(r'window\.__staticRouterHydrationData\s*=\s*JSON\.parse\(
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_apple_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_apple_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Apple's careers site for recent US job openings relevant to the
         user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -74,9 +80,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -165,6 +172,7 @@ def _to_posting(job: dict) -> JobPosting | None:
         url=f"{JOB_BASE_URL}/{position_id}/{slug}" if position_id and slug else "",
         location=_location_text(job.get("locations")),
         date=_parse_posted(job.get("postDateInGMT")),
+        job_id=source_id("apple", position_id),
     )
 
 

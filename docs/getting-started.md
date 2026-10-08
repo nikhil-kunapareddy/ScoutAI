@@ -151,6 +151,7 @@ scout doctor — /Users/you/ScoutAI
   ✓ resume             data/resume.pdf
   ✓ state              in memory — history and the parsed resume reset on restart
   ✓ referrals          /Users/you/ScoutAI/state/referrals.json (not created yet)
+  ✓ shared             /Users/you/ScoutAI/state/shared.sqlite (not created yet)
   ! digest             DIGEST_SLACK_USER unset — `scout digest` has nobody to DM
   ✓ langfuse           off (set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY to trace turns)
 

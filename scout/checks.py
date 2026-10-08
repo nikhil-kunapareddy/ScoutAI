@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .agents import AGENTS
-from .core import models, referrals, settings, tracing
+from .core import models, referrals, settings, shared_jobs, tracing
 from .core.paths import PROJECT_ROOT, under_root
 from .tools.resume import resume_path
 
@@ -83,6 +83,7 @@ def run() -> Report:
             _resume(),
             _state(),
             _referrals(),
+            _shared(),
             _digest(),
             _langfuse(),
         ]
@@ -159,6 +160,12 @@ def _referrals() -> Check:
     path = referrals.store_path()
     where = "exists" if path.is_file() else "not created yet"
     return Check("referrals", f"{path} ({where})")
+
+
+def _shared() -> Check:
+    path = shared_jobs.store_path()
+    where = "exists" if path.is_file() else "not created yet"
+    return Check("shared", f"{path} ({where})")
 
 
 def _digest() -> Check:

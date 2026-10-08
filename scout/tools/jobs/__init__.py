@@ -20,6 +20,7 @@ rather than re-exported here, so each name has one home:
 ``hosted_board``     the Greenhouse/Ashby/SmartRecruiters shape, filled in thrice
 ``workday``          the Workday CXS shape, filled in per tenant
 ``directory``        the other index: company name -> the board to search
+``unsent``           the tool's reply, minus what a digest already sent
 ===================  =======================================================
 """
 

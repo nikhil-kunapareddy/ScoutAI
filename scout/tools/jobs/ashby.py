@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from .hosted_board import HostedBoard
-from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp
+from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp, source_id
 from .relevance import is_ai_ml_role, matches_keywords
 
 BOARD_URL = "https://api.ashbyhq.com/posting-api/job-board/{slug}"
@@ -50,6 +52,7 @@ def _to_posting(job: dict, organization: str, terms: list[str]) -> JobPosting | 
         url=job.get("jobUrl") or job.get("applyUrl", ""),
         location=(job.get("location") or "").strip(),
         date=_parse_published(job.get("publishedAt")),
+        job_id=source_id("ashby", job.get("id")),
     )
 
 
@@ -83,7 +86,10 @@ search = BOARD.search
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_ashby_jobs(company: str, keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_ashby_jobs(  # noqa: D417
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search a company's Ashby careers board for recent US AI/ML job
         openings and return title, date posted, and link.
 
@@ -94,4 +100,4 @@ def register(reg: ToolRegistry) -> None:
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
         """
-        return BOARD.answer(company, keywords, limit)
+        return BOARD.answer(company, keywords, limit, config)

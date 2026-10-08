@@ -123,6 +123,12 @@ RESUME_DIR = os.environ.get("RESUME_DIR", "data")
 # See scout/core/referrals.py.
 REFERRALS_FILE = os.environ.get("REFERRALS_FILE", "state/referrals.json")
 
+# --- Shared store ---
+# One SQLite file every agent's process reads and writes: today, the jobs each
+# digest has already sent. A real path by default, for the referral list's
+# reason, and in state/ for the same rsync one. See scout/core/shared_jobs.py.
+SHARED_DB = os.environ.get("SHARED_DB", "state/shared.sqlite")
+
 # --- Daily digest ---
 # Slack user id the scheduled digest DMs (e.g. U012ABCDEF) — yours, not the
 # bot's. Found under your Slack profile, "Copy member ID".
@@ -130,6 +136,10 @@ DIGEST_SLACK_USER = os.environ.get("DIGEST_SLACK_USER", "")
 # Most roles one digest lists. Each agent sends its own DM, so this caps each
 # message, not the total across agents.
 DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 25)
+# Days a job stays hidden from an agent's digest after that digest sent it. Most
+# postings stay open a month or more, so a week would bring the same open role
+# back every week.
+DIGEST_DEDUPE_DAYS = _env_int("DIGEST_DEDUPE_DAYS", 30)
 
 # --- Turn metrics ---
 # Dollars per million tokens, used to price each turn in the metrics line. Left

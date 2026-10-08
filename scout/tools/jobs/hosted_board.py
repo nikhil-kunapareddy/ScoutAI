@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
+from langchain_core.runnables import RunnableConfig
+
 from . import fetch
 from .posting import (
     DEFAULT_LIMIT,
@@ -24,9 +26,9 @@ from .posting import (
     JobPosting,
     Searcher,
     clamp_int,
-    render_postings,
     take_newest,
 )
+from .unsent import render_unsent
 
 #: Reads one board row into a posting, or None to skip it. ``organization`` is
 #: the company's display name and ``terms`` the lower-cased words the caller
@@ -76,8 +78,15 @@ class HostedBoard:
         """This platform's ``Searcher`` for one company. See ``jobs/directory.py``."""
         return partial(self.search, slug)
 
-    def answer(self, company: str, keywords: str, limit: int) -> str:
-        """The reply a tool returns: the roles, or which gap it hit."""
+    def answer(self, company: str, keywords: str, limit: int, config: RunnableConfig) -> str:
+        """The reply a tool returns: the roles, or which gap it hit.
+
+        Args:
+            company: The company as the model named it.
+            keywords: As the tool was given them.
+            limit: As the tool was given it.
+            config: The tool's run config; see ``unsent.render_unsent``.
+        """
         slug = _slug(company)
         if slug not in self.boards:
             supported = ", ".join(sorted(self.boards))
@@ -92,8 +101,10 @@ class HostedBoard:
                 f"No relevant {name} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
-            f"*Latest {name} AI/ML roles (most recent first) — {{count}} found:*", postings
+        return render_unsent(
+            f"*Latest {name} AI/ML roles (most recent first) — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -25,10 +27,10 @@ from .posting import (
     JobPosting,
     clamp_int,
     parse_iso_timestamp,
-    render_postings,
     take_newest,
 )
 from .relevance import is_ai_ml_role, matches_keywords
+from .unsent import render_unsent
 
 SEARCH_URL = "https://jobs.uber.com/api/jobs/search/"
 JOB_BASE_URL = "https://jobs.uber.com"
@@ -42,7 +44,10 @@ API_PAGE_SIZE = 500
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_uber_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_uber_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Uber's careers site for recent US job openings relevant to the
         user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -59,9 +64,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 

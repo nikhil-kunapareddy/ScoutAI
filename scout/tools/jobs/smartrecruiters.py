@@ -21,9 +21,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from .hosted_board import HostedBoard
-from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp
+from .posting import DEFAULT_LIMIT, JobPosting, parse_iso_timestamp, source_id
 from .relevance import is_ai_ml_role, matches_keywords
 
 BOARD_URL = "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&country=us"
@@ -57,6 +59,7 @@ def _to_posting(job: dict, organization: str, terms: list[str]) -> JobPosting | 
         url=_job_url(job),
         location=_location_text(location),
         date=_parse_released(job.get("releasedDate")),
+        job_id=source_id("smartrecruiters", job.get("id")),
     )
 
 
@@ -100,8 +103,9 @@ search = BOARD.search
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_smartrecruiters_jobs(
-        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_smartrecruiters_jobs(  # noqa: D417
+        company: str, keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
     ) -> str:
         """Search a company's SmartRecruiters careers board for recent US AI/ML
         job openings and return title, date posted, and link.
@@ -112,4 +116,4 @@ def register(reg: ToolRegistry) -> None:
                 If empty, returns all AI/ML-relevant roles.
             limit: Maximum number of roles to return.
         """
-        return BOARD.answer(company, keywords, limit)
+        return BOARD.answer(company, keywords, limit, config)

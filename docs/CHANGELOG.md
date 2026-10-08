@@ -7,6 +7,19 @@ first release.
 
 ## [Unreleased]
 
+### Added
+
+- **A digest never sends you the same job twice within a month.** What each
+  agent's digest sent is recorded in a shared SQLite store, `state/shared.sqlite`
+  (`SHARED_DB`), and every job tool hides those jobs from the model during the
+  next digests — for `DIGEST_DEDUPE_DAYS`, 30 by default. Only the roles the DM
+  actually links to are recorded, so one ranked out today is still new tomorrow.
+  This replaces asking the model to remember yesterday's report, which had
+  already dropped out of its history window. Postings now carry a `job_id` from
+  their source (`amazon:2876543`), falling back to the link. The digest also
+  resets its own thread at the start of every run, so it picks up a changed
+  résumé the next morning, and `scout doctor` reports the store's path.
+
 ### Changed
 
 - **The résumé is `data/resume.pdf`, and only that.** The Resume Parser used to

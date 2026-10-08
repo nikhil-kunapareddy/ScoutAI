@@ -174,6 +174,20 @@ def test_a_configured_checkpoint_db_is_reported_as_a_path(configured, monkeypatc
     assert "state/test.sqlite" in report.render()
 
 
+def test_the_shared_store_is_reported_as_a_path(configured, monkeypatch, tmp_path) -> None:
+    """Not created until the first digest sends something, which is not a fault."""
+    path = tmp_path / "shared.sqlite"
+    monkeypatch.setattr(settings, "SHARED_DB", str(path))
+
+    before = checks.run()
+    path.write_bytes(b"")
+    after = checks.run()
+
+    assert levels(before)["shared"] == checks.OK
+    assert f"{path} (not created yet)" in before.render()
+    assert f"{path} (exists)" in after.render()
+
+
 def test_the_report_asks_nothing_of_the_network(configured, monkeypatch) -> None:
     """The point of doctor: it describes this checkout, not the internet.
 

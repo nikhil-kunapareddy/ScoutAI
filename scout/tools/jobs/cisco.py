@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import (
@@ -26,10 +28,11 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
+    source_id,
     take_newest,
 )
 from .relevance import is_ai_ml_role
+from .unsent import render_unsent
 
 WIDGETS_URL = "https://careers.cisco.com/widgets"
 JOB_BASE_URL = "https://careers.cisco.com/global/en/job"
@@ -44,7 +47,10 @@ API_PAGE_SIZE = 100
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_cisco_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_cisco_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Cisco's careers site for recent US job openings relevant to the
         user's field (AI/ML engineering) and return title, date posted, and link.
 
@@ -61,9 +67,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
+        return render_unsent(
             f"*Latest {ORGANIZATION} AI/ML roles (most recent first) — {{count}} found:*",
             postings,
+            config=config,
         )
 
 
@@ -133,6 +140,7 @@ def _to_posting(job: dict) -> JobPosting | None:
         url=f"{JOB_BASE_URL}/{seq_no}" if seq_no else "",
         location=(job.get("location") or "").strip(),
         date=_parse_posted(job.get("postedDate")),
+        job_id=source_id("cisco", seq_no),
     )
 
 

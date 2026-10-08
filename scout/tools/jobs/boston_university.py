@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
+
 from ..registry import ToolRegistry
 from . import feeds, fetch
 from .posting import (
@@ -15,10 +17,10 @@ from .posting import (
     MAX_LIMIT,
     JobPosting,
     clamp_int,
-    render_postings,
     take_newest,
 )
 from .relevance import is_ai_ml_role, is_excluded, matches_keywords
+from .unsent import render_unsent
 
 FEED_URL = "https://jobs.silkroad.com/BU/External/rss"
 ORGANIZATION = "Boston University"
@@ -26,7 +28,10 @@ ORGANIZATION = "Boston University"
 
 def register(reg: ToolRegistry) -> None:
     @reg.tool
-    def search_boston_university_jobs(keywords: str = "", limit: int = DEFAULT_LIMIT) -> str:
+    # `config` is injected by LangChain and kept out of the schema: no Args: entry.
+    def search_boston_university_jobs(  # noqa: D417
+        keywords: str = "", limit: int = DEFAULT_LIMIT, *, config: RunnableConfig
+    ) -> str:
         """Search Boston University's careers site for recent job openings and
         return each role's title, location, date posted, and link.
 
@@ -45,8 +50,10 @@ def register(reg: ToolRegistry) -> None:
                 f"No relevant {ORGANIZATION} roles found right now. "
                 "Try again later or adjust your keywords."
             )
-        return render_postings(
-            f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*", postings
+        return render_unsent(
+            f"*Latest {ORGANIZATION} roles (most recent first) — {{count}} found:*",
+            postings,
+            config=config,
         )
 
 
