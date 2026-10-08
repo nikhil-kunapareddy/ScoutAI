@@ -178,6 +178,7 @@ def test_doctor_is_happy_with_a_configured_checkout(monkeypatch, capsys) -> None
 
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-x")
     monkeypatch.setattr(settings, "SLACK_APP_TOKEN", "xapp-x")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setattr(settings, "ACTIVE_AGENT", "bigtech")
 
     assert cli.main(["doctor"]) == 0
