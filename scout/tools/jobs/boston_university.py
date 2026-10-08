@@ -18,7 +18,7 @@ from .posting import (
     render_postings,
     take_newest,
 )
-from .relevance import is_ai_ml_role, matches_keywords
+from .relevance import is_ai_ml_role, is_excluded, matches_keywords
 
 FEED_URL = "https://jobs.silkroad.com/BU/External/rss"
 ORGANIZATION = "Boston University"
@@ -91,9 +91,12 @@ def _is_wanted(title: str, terms: list[str]) -> bool:
     """Explicit keywords win; otherwise fall back to the AI/ML filter.
 
     The feed has no server-side search, so one of the two always applies — asking
-    BU for "custodian" should find one, without the AI/ML filter dropping it.
+    BU for "custodian" should find one, without the AI/ML filter dropping it. The
+    exclusions apply either way.
     """
-    return matches_keywords(title, terms) if terms else is_ai_ml_role(title)
+    if terms:
+        return matches_keywords(title, terms) and not is_excluded(title)
+    return is_ai_ml_role(title)
 
 
 def _parse_posted_date(raw: str) -> datetime | None:

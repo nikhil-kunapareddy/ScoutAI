@@ -22,19 +22,27 @@ from scout.tools.jobs.relevance import (
 
 @pytest.mark.parametrize("title", [
     "Machine Learning Engineer",
-    "Applied Scientist II",
-    "Senior Research Engineer, Personalization",
+    "Applied Artificial Intelligence Engineer",
+    "Data Analyst II",
+    "Staffing Data Analyst",          # "staff" is excluded as a whole word only
+    "Financial Analyst",              # "analyst" on its own counts, in any field
     "Software Engineer, AI",          # standalone token
     "LLM Infrastructure Engineer",
     "Data Scientist, Ads",
-    "GenAI Solutions Architect",
+    "Backend Software Engineer",
+    "Software Engineer II",
 ])
 def test_ai_ml_titles(title: str) -> None:
     assert is_ai_ml_role(title)
 
 
 @pytest.mark.parametrize("title", [
-    "Financial Analyst",
+    "Applied Scientist II",           # not on the phrase list
+    "Senior Research Engineer, Personalization",
+    "Senior Machine Learning Engineer",   # excluded even though it matches a phrase
+    "Staff Software Engineer",
+    "Member of Technical Staff, Inference",
+    "GenAI Solutions Architect",      # "genai" is one word, so not the "ai" token
     "Supply Chain Manager",
     "Technical Program Manager",
     "Retail Sales Associate",

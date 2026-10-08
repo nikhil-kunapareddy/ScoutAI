@@ -10,6 +10,7 @@ from __future__ import annotations
 from ..registry import ToolRegistry
 from . import fetch
 from .posting import DEFAULT_LIMIT, MAX_LIMIT, JobPosting, clamp_int, render_postings
+from .relevance import is_excluded
 
 #: The parts of the Workday CXS endpoint, POST https://{host}/wday/cxs/{tenant}/{site}/jobs.
 HOST = "northeastern.wd1.myworkdayjobs.com"
@@ -56,7 +57,8 @@ def search(keywords: str = "", limit: int = DEFAULT_LIMIT) -> list[JobPosting] |
     rows = fetch.post_rows(JOBS_URL, "jobPostings", _payload(keywords, limit))
     if rows is None:
         return None
-    return [_to_posting(job) for job in rows[:limit]]
+    postings = [_to_posting(job) for job in rows]
+    return [posting for posting in postings if not is_excluded(posting.title)][:limit]
 
 
 def _payload(keywords: str, limit: int) -> dict[str, object]:
