@@ -35,23 +35,32 @@ from .logging_config import logger
 
 log = logger()
 
+#: The graph's node names. ``tools_condition`` routes to ``"tools"`` by that
+#: literal, and both are span names in Langfuse, so neither is free to change.
+_MODEL_NODE = "model"
+_TOOLS_NODE = "tools"
+
 
 @dataclass
 class AgentSpec:
     """Declarative description of one agent. Add an agent = add one of these."""
 
-    key: str                        # id used to select the agent (e.g. "bigtech")
-    name: str                       # display name (e.g. "BigTech Agent")
+    #: Registry key, used to select the agent (e.g. ``"bigtech"``).
+    key: str
+    #: Display name (e.g. ``"BigTech Agent"``).
+    name: str
+    #: The agent's instructions, sent as the system message on every model call.
     system_prompt: str
-    tool_modules: list[ModuleType] = field(default_factory=list)  # each has register(reg)
-    # Run behind the resume-parser stage, which appends a profile distilled from
-    # the user's resume to this agent's instructions. See resume_tailored.py.
+    #: Tool modules, each defining ``register(reg)``; see ``scout/tools/``.
+    tool_modules: list[ModuleType] = field(default_factory=list)
+    #: Run behind the resume-parser stage, which appends a profile distilled from
+    #: the user's resume to this agent's instructions. See ``resume_tailored.py``.
     tailor_with_resume: bool = False
-    # Whether this agent has a daily digest of its own: one timer instance, one
-    # process carrying this agent's Slack token, one DM in this agent's window.
-    # Separate from tailor_with_resume because the two answer different
-    # questions — the Referral Window searches a scope rather than a resume, and
-    # still has something to report every morning. See scout/digest.py.
+    #: Whether this agent has a daily digest of its own: one timer instance, one
+    #: process carrying this agent's Slack token, one DM in this agent's window.
+    #: Separate from ``tailor_with_resume`` because the two answer different
+    #: questions — the Referral Window searches a scope rather than a resume, and
+    #: still has something to report every morning. See ``scout/digest.py``.
     in_digest: bool = False
 
 
@@ -113,16 +122,16 @@ def build_agent_graph(spec: AgentSpec, tools: list[BaseTool]) -> StateGraph:
     its own, while a graph embedded as a subgraph inherits its parent's.
     """
     builder = StateGraph(AgentState)
-    builder.add_node("model", _model_node(spec, tools))
-    builder.add_node("tools", ToolNode(tools, handle_tool_errors=_tool_error))
-    builder.add_edge(START, "model")
+    builder.add_node(_MODEL_NODE, _build_model_node(spec, tools))
+    builder.add_node(_TOOLS_NODE, ToolNode(tools, handle_tool_errors=_tool_error_message))
+    builder.add_edge(START, _MODEL_NODE)
     # tools_condition routes to "tools" when the reply asked for one, else END.
-    builder.add_conditional_edges("model", tools_condition)
-    builder.add_edge("tools", "model")
+    builder.add_conditional_edges(_MODEL_NODE, tools_condition)
+    builder.add_edge(_TOOLS_NODE, _MODEL_NODE)
     return builder
 
 
-def _model_node(spec: AgentSpec, tools: list[BaseTool]) -> AgentNode:
+def _build_model_node(spec: AgentSpec, tools: list[BaseTool]) -> AgentNode:
     """The node that calls the model.
 
     A call that fails raises out of the turn, after ``ChatAnthropic``'s own
@@ -160,14 +169,14 @@ def _within_window(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
         messages,
         strategy="last",
         token_counter=len,  # count messages, not tokens
-        max_tokens=settings.MAX_TURNS * 2,
+        max_tokens=settings.MAX_TURNS * 2,  # MAX_TURNS counts question/reply pairs
         start_on="human",
         include_system=False,
         allow_partial=False,
     )
 
 
-def _tool_error(exc: Exception) -> str:
+def _tool_error_message(exc: Exception) -> str:
     """Turn a tool failure into text the model can read and act on."""
     log.warning("Tool failed: %s", exc)
     return f"Error running tool: {exc}"

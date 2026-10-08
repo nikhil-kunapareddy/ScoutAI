@@ -109,44 +109,47 @@ class GraphRunner(ConversationalAgent):
         """Run ``prompt`` through this user's thread and return the reply.
 
         Holds the user's lock for the whole turn, serializing their messages;
-        other users run in parallel.
+        other users run in parallel. A turn that runs out of tool hops is
+        answered with ``STUCK_REPLY``; any other failure is recorded and raised.
+
+        Args:
+            user_id: The thread to run on — a Slack user id, or ``digest:<key>``.
+            prompt: The message to answer.
         """
         with self._lock_for(user_id):
             config = self._config(user_id)
-            started = time.monotonic()
+            started_at = time.monotonic()
             # One turn, one trace (a no-op when tracing is off). The reply is
             # handed back to it so the trace records what the user was told,
             # whichever way the turn ended.
-            with tracing.traced(
-                config, agent=self.name, thread=user_id, prompt=prompt
-            ) as turn:
+            with tracing.traced(config, agent=self.name, thread=user_id, prompt=prompt) as turn:
+                state: dict | None
                 try:
-                    state = self._graph.invoke(
-                        {"messages": [HumanMessage(prompt)]}, turn.config
-                    )
+                    state = self._graph.invoke({"messages": [HumanMessage(prompt)]}, turn.config)
                 except GraphRecursionError:
                     log.warning(
                         "Hit the %s-hop tool limit without a final answer",
                         settings.MAX_TOOL_HOPS,
                     )
+                    state = None
+                    outcome = metrics.STUCK
                     reply = self._give_up(config)
-                    self._measure(user_id, config, started, metrics.STUCK)
-                    turn.answered(reply)
-                    return reply
                 except Exception:
-                    self._measure(user_id, config, started, metrics.ERROR)
+                    self._record_metrics(user_id, config, started_at, metrics.ERROR)
                     raise
+                else:
+                    outcome = metrics.OK
+                    reply = _reply_text(state["messages"][-1])
 
-                self._measure(user_id, config, started, metrics.OK, state)
-                reply = _reply_text(state["messages"][-1])
+                self._record_metrics(user_id, config, started_at, outcome, state)
                 turn.answered(reply)
                 return reply
 
-    def _measure(
+    def _record_metrics(
         self,
         user_id: str,
         config: RunnableConfig,
-        started: float,
+        started_at: float,
         outcome: str,
         state: dict | None = None,
     ) -> None:
@@ -154,7 +157,7 @@ class GraphRunner(ConversationalAgent):
 
         ``state`` is passed on the happy path because the caller already has it;
         the other paths read it back, which also picks up the repair ``_give_up``
-        just wrote. Measuring must never be what breaks a reply, hence the catch.
+        just wrote. Recording must never be what breaks a reply, hence the catch.
         """
         try:
             values = state if state is not None else self._graph.get_state(config).values
@@ -163,7 +166,7 @@ class GraphRunner(ConversationalAgent):
                     agent=self.name,
                     thread=user_id,
                     outcome=outcome,
-                    seconds=time.monotonic() - started,
+                    seconds=time.monotonic() - started_at,
                     messages=values.get("messages", []),
                 )
             )
@@ -179,14 +182,13 @@ class GraphRunner(ConversationalAgent):
         user's *next* message, not just this one.
         """
         messages = self._graph.get_state(config).values.get("messages", [])
-        abandoned = getattr(messages[-1], "tool_calls", None) if messages else None
-        answers = [
-            ToolMessage(
-                content=STUCK_TOOL_RESULT, tool_call_id=call["id"], name=call["name"]
-            )
-            for call in abandoned or []
+        last_message = messages[-1] if messages else None
+        abandoned_calls = getattr(last_message, "tool_calls", None) or []
+        tool_results = [
+            ToolMessage(content=STUCK_TOOL_RESULT, tool_call_id=call["id"], name=call["name"])
+            for call in abandoned_calls
         ]
-        self._graph.update_state(config, {"messages": [*answers, AIMessage(STUCK_REPLY)]})
+        self._graph.update_state(config, {"messages": [*tool_results, AIMessage(STUCK_REPLY)]})
         return STUCK_REPLY
 
 

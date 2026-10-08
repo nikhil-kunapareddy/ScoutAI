@@ -9,7 +9,7 @@ file, and the model distils that text into the fields below. ``parse_profile``
 turns the reply into a ``CandidateProfile``; ``to_search_brief`` renders it as
 the hand-off message.
 
-Run it alone to check the parsing step: ``AGENT=resume python run.py``.
+Run it alone to check the parsing step: ``scout run --agent resume``.
 """
 
 from __future__ import annotations
@@ -31,40 +31,48 @@ class CandidateProfile:
     feed the ``keywords=`` argument of the job-search tools.
     """
 
-    titles: list[str] = field(default_factory=list)    # target roles, e.g. "ML Engineer"
-    skills: list[str] = field(default_factory=list)    # notable skills / technologies
-    keywords: list[str] = field(default_factory=list)  # search phrases for the job tools
-    seniority: str = ""                                # "entry" / "mid" / "senior"
-    summary: str = ""                                  # one-line background
+    #: Target roles, e.g. ``"ML Engineer"``.
+    titles: list[str] = field(default_factory=list)
+    #: Notable skills and technologies.
+    skills: list[str] = field(default_factory=list)
+    #: Search phrases for the job tools.
+    keywords: list[str] = field(default_factory=list)
+    #: ``"entry"``, ``"mid"`` or ``"senior"``.
+    seniority: str = ""
+    #: One-line background.
+    summary: str = ""
 
     def to_search_brief(self) -> str:
         """Render the profile as the message handed to the job agent."""
-        parts = ["Candidate profile (use this to tailor and search for roles):"]
+        lines = ["Candidate profile (use this to tailor and search for roles):"]
         if self.summary:
-            parts.append(f"- Background: {self.summary}")
+            lines.append(f"- Background: {self.summary}")
         if self.seniority:
-            parts.append(f"- Seniority: {self.seniority}")
+            lines.append(f"- Seniority: {self.seniority}")
         if self.titles:
-            parts.append(f"- Target titles: {', '.join(self.titles)}")
+            lines.append(f"- Target titles: {', '.join(self.titles)}")
         if self.skills:
-            parts.append(f"- Key skills: {', '.join(self.skills)}")
+            lines.append(f"- Key skills: {', '.join(self.skills)}")
         if self.keywords:
-            parts.append(f"- Search keywords: {', '.join(self.keywords)}")
-        return "\n".join(parts)
+            lines.append(f"- Search keywords: {', '.join(self.keywords)}")
+        return "\n".join(lines)
 
 
 # --- Turning the agent's reply into a profile -----------------------------
 
 
-def parse_profile(raw: str) -> CandidateProfile:
+def parse_profile(reply: str) -> CandidateProfile:
     """Parse the parser agent's reply (expected to be JSON) into a profile.
 
-    Tolerant on purpose: small local models wrap JSON in code fences or add a
-    sentence around it, so we take the outermost ``{...}`` and coerce types. Total
-    failure returns an empty profile, degrading to an untailored search rather
-    than erroring out.
+    Tolerant on purpose: the model sometimes wraps the JSON in code fences or a
+    sentence despite being told not to, so this takes the outermost ``{...}``
+    and coerces types. Total failure returns an empty profile, degrading to an
+    untailored search rather than erroring out.
+
+    Args:
+        reply: The parser agent's final message text.
     """
-    data = _extract_json_object(raw)
+    data = _extract_json_object(reply)
     if data is None:
         return CandidateProfile()
 
@@ -72,30 +80,36 @@ def parse_profile(raw: str) -> CandidateProfile:
         titles=_as_list(data.get("titles")),
         skills=_as_list(data.get("skills")),
         keywords=_as_list(data.get("keywords")),
-        seniority=str(data.get("seniority") or "").strip(),
-        summary=str(data.get("summary") or "").strip(),
+        seniority=_as_text(data.get("seniority")),
+        summary=_as_text(data.get("summary")),
     )
 
 
-def _as_list(value: object) -> list[str]:
-    """Coerce a field to a list of strings, accepting "a, b" for ["a", "b"]."""
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str) and value.strip():
-        return [part.strip() for part in value.split(",") if part.strip()]
-    return []
-
-
-def _extract_json_object(raw: str) -> dict | None:
+def _extract_json_object(text: str) -> dict[str, object] | None:
     """Best-effort pull of the outermost JSON object from a text blob."""
-    start, end = raw.find("{"), raw.rfind("}")
+    start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
         return None
     try:
-        parsed = json.loads(raw[start:end + 1])
+        parsed = json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _as_list(value: object) -> list[str]:
+    """Coerce a field to a list of non-empty strings, accepting "a, b" for ["a", "b"]."""
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, list):
+        return []
+    items = (str(item).strip() for item in value)
+    return [item for item in items if item]
+
+
+def _as_text(value: object) -> str:
+    """Coerce a field to a stripped string, treating a missing value as empty."""
+    return str(value or "").strip()
 
 
 # --- The agent spec -------------------------------------------------------

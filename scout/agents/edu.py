@@ -25,10 +25,11 @@ SPEC = AgentSpec(
     key="edu",
     name="Edu Agent",
     system_prompt=SYSTEM_PROMPT,
-    # No referrals_read, by request, as for BigTech: this agent ranks on fit and
-    # recency, and the referral list is the Referral Window's scope, not a
-    # tiebreak here.
+    # No referral tool, not even referrals_read: job agents rank on fit and
+    # recency, and the referral list is the Referral Window's scope.
     tool_modules=[clock, location, northeastern, boston_university],
-    tailor_with_resume=True,  # supplies the candidate profile the prompt expects
-    in_digest=True,           # sweeps every source into its own morning DM
+    # Supplies the candidate profile the prompt refers to.
+    tailor_with_resume=True,
+    # Sweeps every source into its own morning DM.
+    in_digest=True,
 )
