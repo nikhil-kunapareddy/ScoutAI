@@ -13,5 +13,5 @@ langchain-anthropic>=1.7.2
 requests>=2.31.0
 python-dotenv>=1.0.0
 pypdf>=6.18.1
-langfuse>=4.0.0
+langfuse>=4.17.0
 langchain>=1.4.0
