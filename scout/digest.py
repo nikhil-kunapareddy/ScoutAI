@@ -18,10 +18,11 @@ threads the Slack bot uses, so the digest never consumes the chat history's
 has no idea one happened.
 
 What a digest already sent is not in that thread; it is in ``shared_jobs``. Every
-job tool hides what this agent sent within ``DIGEST_DEDUPE_DAYS`` before the
-model sees it (``tools/jobs/unsent.py``), and once the DM is posted, the postings
-whose links it carries are recorded. So the thread holds nothing tomorrow needs,
-and it is reset at the start of every run: no history to outgrow the window, and
+job tool hides what this agent ever sent, and anything posted more than
+``DIGEST_MAX_AGE_DAYS`` ago, before the model sees it (``tools/jobs/unsent.py``),
+and once the DM is posted, the postings whose links it carries are recorded. So
+the thread holds nothing tomorrow needs, and it is reset at the start of every
+run: no history to outgrow the window, and
 a changed résumé is parsed again the next morning rather than never.
 """
 
@@ -57,9 +58,10 @@ _HEADER_DATE_FORMAT = "%a %d %b %Y"
 #: so asking for the shape is enough to make every day's report read the same.
 DIGEST_REQUEST = (
     "Daily job digest. Search everything you cover and report what is open, "
-    "best first — at most {max_roles} roles. Prefer roles posted in the last "
-    "few days. Roles an earlier digest sent are already left out of what your "
-    "tools return.\n"
+    "best first — at most {max_roles} roles. Roles posted more than "
+    "{max_age_days} days ago, and roles an earlier digest sent, are already left "
+    "out of what your tools return, so fewer than {max_roles} is a fine answer: "
+    "never pad the list.\n"
     "\n"
     "Format every role exactly like this, and put nothing else between them:\n"
     "\n"
@@ -134,7 +136,9 @@ def _active_digest_spec() -> AgentSpec:
 def _request_report(spec: AgentSpec) -> str:
     """The agent's report, or a one-line failure note in its place."""
     log.info("Digest: running %s", spec.key)
-    request = DIGEST_REQUEST.format(max_roles=settings.DIGEST_MAX_ROLES)
+    request = DIGEST_REQUEST.format(
+        max_roles=settings.DIGEST_MAX_ROLES, max_age_days=settings.DIGEST_MAX_AGE_DAYS
+    )
     thread = _thread_id(spec)
     try:
         agent = build_agent(spec)

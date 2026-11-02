@@ -8,9 +8,10 @@ folder out of its rsync, so a redeploy cannot overwrite the box's copy.
 
 One row per job per agent, keyed ``(agent, job_id)``. The same opening can reach
 you once from BigTech and once from the Referral Window, since they answer
-different questions, but never twice from one agent inside the window. Sending
-it again refreshes ``shared_at``, so a role still open a month on can come back
-once and then hides for another window.
+different questions, but never twice from one agent. There is no window: a row
+hides its job from that agent's digests for good. A dated posting would age out
+of the digest within a week anyway (``DIGEST_MAX_AGE_DAYS``); an undated one has
+nothing else to keep a long-open role from coming back every month.
 
     CREATE TABLE shared_jobs (agent, job_id, title, company, url, shared_at,
                               PRIMARY KEY (agent, job_id))
@@ -24,7 +25,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import closing, contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..tools.jobs.posting import JobPosting
@@ -68,19 +69,15 @@ def store_path() -> Path:
     return under_root(settings.SHARED_DB)
 
 
-def recently_shared(agent: str, days: int, now: datetime | None = None) -> set[str]:
-    """The keys of every job ``agent`` sent in the last ``days`` days.
+def already_sent(agent: str) -> set[str]:
+    """The keys of every job ``agent``'s digest has ever sent.
 
     Args:
         agent: The agent's registry key, e.g. ``"bigtech"``.
-        days: How far back to look.
-        now: The current time; defaults to the real one.
     """
-    cutoff = _timestamp((now or _utc_now()) - timedelta(days=days))
     with _connection() as conn:
         rows = conn.execute(
-            "SELECT job_id FROM shared_jobs WHERE agent = ? AND shared_at >= ?",
-            (agent, cutoff),
+            "SELECT job_id FROM shared_jobs WHERE agent = ?", (agent,)
         ).fetchall()
     return {job_id for (job_id,) in rows}
 

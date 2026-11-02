@@ -9,10 +9,19 @@ first release.
 
 ### Added
 
-- **A digest never sends you the same job twice within a month.** What each
+- **A digest shows only jobs posted in the last week.** Every job tool drops,
+  in a digest turn, any posting older than `DIGEST_MAX_AGE_DAYS` (7) before the
+  model sees it — by the source's date, or a Workday "Posted 30+ Days Ago"
+  label. The digest prompt used to only *prefer* recent roles, so a quiet week
+  was padded with roles from August and September. Now a quiet week gets a
+  short digest. Google and Bloomberg publish no dates, so their roles pass;
+  each is still sent only once. Chat is unaffected.
+- **A digest never sends you the same job twice.** What each
   agent's digest sent is recorded in a shared SQLite store, `state/shared.sqlite`
-  (`SHARED_DB`), and every job tool hides those jobs from the model during the
-  next digests — for `DIGEST_DEDUPE_DAYS`, 30 by default. Only the roles the DM
+  (`SHARED_DB`), and every job tool hides those jobs from the model in every
+  later digest. There is no window: `DIGEST_DEDUPE_DAYS` is gone, since the age
+  cutoff retires dated jobs anyway and an undated one would otherwise come back
+  each month. Only the roles the DM
   actually links to are recorded, so one ranked out today is still new tomorrow.
   This replaces asking the model to remember yesterday's report, which had
   already dropped out of its history window. Postings now carry a `job_id` from

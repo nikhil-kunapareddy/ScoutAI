@@ -136,10 +136,12 @@ DIGEST_SLACK_USER = os.environ.get("DIGEST_SLACK_USER", "")
 # Most roles one digest lists. Each agent sends its own DM, so this caps each
 # message, not the total across agents.
 DIGEST_MAX_ROLES = _env_int("DIGEST_MAX_ROLES", 25)
-# Days a job stays hidden from an agent's digest after that digest sent it. Most
-# postings stay open a month or more, so a week would bring the same open role
-# back every week.
-DIGEST_DEDUPE_DAYS = _env_int("DIGEST_DEDUPE_DAYS", 30)
+# Oldest posting a digest will show, in days since the source says it went up.
+# Enforced in code (tools/jobs/unsent.py) before the model sees a list, so a
+# quiet week means a short digest rather than one padded with August's roles. A
+# posting whose source publishes no date passes; the shared store keeps it from
+# coming back. A job a digest sent is hidden from that agent's digests for good.
+DIGEST_MAX_AGE_DAYS = _env_int("DIGEST_MAX_AGE_DAYS", 7)
 
 # --- Turn metrics ---
 # Dollars per million tokens, used to price each turn in the metrics line. Left

@@ -1,12 +1,13 @@
-"""Hiding what a digest already sent, and spotting what it sends.
+"""Hiding what a digest already sent or what is too old, and spotting what it sends.
 
 Outside a digest the job tools must answer exactly as before; inside one, a
-posting the agent sent within the window must never reach the model at all.
+posting the agent ever sent, or one posted before the cutoff, must never reach
+the model at all.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -74,16 +75,88 @@ def test_a_digest_hides_what_this_agent_already_sent() -> None:
     assert "*1 found:*" in out
     assert "AI Engineer" in out
     assert "ML Engineer" not in out
-    assert "_f_\n_1 more already sent in the last 30 days, hidden._" in out
+    assert "_f_\n_1 more already sent in an earlier digest, hidden._" in out
 
 
-def test_the_window_comes_from_settings(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "DIGEST_DEDUPE_DAYS", 7)
-    shared_jobs.record("bigtech", [SEEN])
+def test_what_was_sent_long_ago_is_still_hidden() -> None:
+    """No window: "not in a previous run" means any previous run."""
+    shared_jobs.record("bigtech", [SEEN], now=datetime.now(timezone.utc) - timedelta(days=365))
 
     out = unsent.render_unsent("*{count} found:*", [SEEN], config=DIGEST)
 
-    assert "in the last 7 days" in out
+    assert "ML Engineer" not in out
+
+
+# --- The age cutoff ----------------------------------------------------------
+
+
+def days_ago(days: float) -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=days)
+
+
+OLD = JobPosting("Old Scientist", "Netflix", "https://jobs/old", date=days_ago(40))
+WEEK_OLD = JobPosting("Week Scientist", "Netflix", "https://jobs/week", date=days_ago(6.5))
+
+
+def test_a_digest_hides_what_was_posted_before_the_cutoff() -> None:
+    out = unsent.render_unsent("*{count} found:*", [OLD, WEEK_OLD], footer="_f_", config=DIGEST)
+
+    assert "*1 found:*" in out
+    assert "Week Scientist" in out
+    assert "Old Scientist" not in out
+    assert "_f_\n_1 more posted over 7 days ago, hidden._" in out
+    assert list(unsent._offered["digest:bigtech"]) == ["https://jobs/week"]
+
+
+def test_the_cutoff_comes_from_settings(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "DIGEST_MAX_AGE_DAYS", 60)
+
+    out = unsent.render_unsent("*{count} found:*", [OLD], config=DIGEST)
+
+    assert "Old Scientist" in out
+    assert "hidden" not in out
+
+
+def test_a_workday_label_is_held_to_the_cutoff() -> None:
+    stale = JobPosting("Stale", "Workday Co", "https://wd/1", posted_label="Posted 30+ Days Ago")
+    recent = JobPosting("Recent", "Workday Co", "https://wd/2", posted_label="Posted 3 Days Ago")
+
+    out = unsent.render_unsent("*{count} found:*", [stale, recent], config=DIGEST)
+
+    assert "Recent" in out
+    assert "Stale" not in out
+
+
+def test_an_undated_posting_passes_once() -> None:
+    """Google and Bloomberg publish no date. Such a role is shown, and once sent
+    it is gone for good: the store does what the cutoff cannot."""
+    undated = JobPosting(
+        "ML Engineer", "Google", "https://g/1", posted_label="not published by Google",
+    )
+
+    first = unsent.render_unsent("*{count} found:*", [undated], config=DIGEST)
+    shared_jobs.record("bigtech", unsent.take_sent("digest:bigtech", "https://g/1"))
+    second = unsent.render_unsent("*{count} found:*", [undated], config=DIGEST)
+
+    assert "ML Engineer" in first
+    assert "ML Engineer" not in second
+
+
+def test_each_rule_counts_what_it_hid() -> None:
+    """An old role that was also sent counts once, as old."""
+    shared_jobs.record("bigtech", [SEEN, OLD])
+
+    out = unsent.render_unsent("*{count} found:*", [SEEN, OLD, FRESH], config=DIGEST)
+
+    assert "_1 more posted over 7 days ago, hidden._\n" in out
+    assert "_1 more already sent in an earlier digest, hidden._" in out
+
+
+def test_chat_shows_old_postings() -> None:
+    """The cutoff is the digest's rule. Asked in chat, every open role counts."""
+    out = unsent.render_unsent("*{count} found:*", [OLD], config=CHAT)
+
+    assert "Old Scientist" in out
 
 
 def test_another_agents_sends_are_not_hidden() -> None:
@@ -97,16 +170,17 @@ def test_another_agents_sends_are_not_hidden() -> None:
 
 def test_an_unreadable_store_hides_nothing_and_says_so(monkeypatch) -> None:
     """A repeat is a better morning than no digest."""
-    def broken(agent: str, days: int) -> set[str]:
+    def broken(agent: str) -> set[str]:
         raise shared_jobs.SharedJobsError("state/shared.sqlite: disk I/O error")
 
-    monkeypatch.setattr(shared_jobs, "recently_shared", broken)
+    monkeypatch.setattr(shared_jobs, "already_sent", broken)
 
-    out = unsent.render_unsent("*{count} found:*", [SEEN], config=DIGEST)
+    out = unsent.render_unsent("*{count} found:*", [SEEN, OLD], config=DIGEST)
 
     assert "ML Engineer" in out
     assert "Couldn't check which of these were already sent" in out
     assert "disk I/O error" in out
+    assert "Old Scientist" not in out  # the age rule needs no store
 
 
 def test_what_the_dm_links_to_is_what_was_sent() -> None:
@@ -146,10 +220,10 @@ def test_a_posting_with_no_link_is_never_offered() -> None:
 def test_a_real_tool_hides_what_was_sent_in_a_digest_turn(monkeypatch) -> None:
     """The whole chain: LangChain injects the config, the tool hands it on, and
     the role the digest already sent never reaches the model."""
-    now = datetime(2026, 8, 20, tzinfo=timezone.utc).timestamp()
     fake = FakeRequests(FakeResponse({"positions": [
-        {"id": 1, "name": "Data Analyst", "t_create": now},
-        {"id": 2, "name": "Machine Learning Engineer", "t_create": now},
+        {"id": 1, "name": "Data Analyst", "t_create": days_ago(1).timestamp()},
+        {"id": 2, "name": "Machine Learning Engineer", "t_create": days_ago(1).timestamp()},
+        {"id": 3, "name": "Data Scientist", "t_create": days_ago(60).timestamp()},
     ]}))
     stub_requests(monkeypatch, netflix, fake)
     tool = build_registry([netflix]).tools[0]
@@ -159,7 +233,9 @@ def test_a_real_tool_hides_what_was_sent_in_a_digest_turn(monkeypatch) -> None:
     in_digest = tool.invoke({}, config=DIGEST)
 
     assert "Machine Learning Engineer" in in_chat
+    assert "Data Scientist" in in_chat
     assert "Machine Learning Engineer" not in in_digest
+    assert "Data Scientist" not in in_digest
     assert "Data Analyst" in in_digest
 
 

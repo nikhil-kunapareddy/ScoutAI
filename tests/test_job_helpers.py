@@ -91,6 +91,38 @@ def test_posted_text_prefers_a_real_date() -> None:
     assert unknown.posted_text == "not listed"
 
 
+AGE_NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def test_age_comes_from_a_real_date_aware_or_naive() -> None:
+    aware = JobPosting("T", "Org", "u", date=AGE_NOW - timedelta(days=8))
+    naive = JobPosting("T", "Org", "u", date=(AGE_NOW - timedelta(days=3)).replace(tzinfo=None))
+
+    assert aware.age_days(AGE_NOW) == 8.0
+    # A naive date is local time, as in sort_key, so only roughly three days.
+    assert 2 < naive.age_days(AGE_NOW) < 4
+
+
+@pytest.mark.parametrize(("label", "days"), [
+    ("Posted Today", 0.0),
+    ("Posted Yesterday", 1.0),
+    ("Posted 5 Days Ago", 5.0),
+    ("Posted 1 Day Ago", 1.0),
+    ("Posted 30+ Days Ago", 30.0),   # "at least 30" is all a cutoff needs
+    ("posted 12 days ago", 12.0),
+])
+def test_age_comes_from_a_workday_label(label, days) -> None:
+    assert JobPosting("T", "Org", "u", posted_label=label).age_days(AGE_NOW) == days
+
+
+@pytest.mark.parametrize("label", [
+    "", "not published by Google", "Oct 20, 2026", "Hiring today", "5 days ago",
+])
+def test_no_age_when_the_source_gives_none(label) -> None:
+    """Undated is not the same as old: the digest lets these through."""
+    assert JobPosting("T", "Org", "u", posted_label=label).age_days(AGE_NOW) is None
+
+
 def test_take_newest_mixes_aware_and_naive_dates() -> None:
     """Regression: comparing tz-aware Greenhouse dates with naive Amazon ones
     raises, so ordering goes through a POSIX timestamp instead."""
