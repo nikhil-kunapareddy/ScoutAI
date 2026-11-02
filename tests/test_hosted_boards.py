@@ -102,7 +102,7 @@ def test_greenhouse_location_heuristic(location: str, is_us: bool) -> None:
 
 ASHBY_JOBS = {
     "jobs": [
-        {"title": "Lead Machine Learning Engineer", "jobUrl": "https://ashby/1",
+        {"title": "Junior Machine Learning Engineer", "jobUrl": "https://ashby/1",
          "location": "Boston, MA", "publishedAt": "2026-07-15T10:00:00.500+00:00",
          "isListed": True,
          "address": {"postalAddress": {"addressCountry": "United States"}}},
@@ -129,7 +129,7 @@ def test_ashby_filters_by_relevance_listing_and_country(monkeypatch) -> None:
     out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch, company="whoop")
 
     assert "Latest WHOOP AI/ML roles" in out
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Machine Learning Engineer" in out
     assert "Data Scientist, Growth" not in out   # India
     assert "Physical Therapist" not in out       # not AI/ML
     assert "ML Engineer, Perception" not in out  # pulled from the board
@@ -149,7 +149,7 @@ def test_ashby_narrows_by_keyword(monkeypatch) -> None:
     out = call_tool(ashby, "search_ashby_jobs", fake, monkeypatch,
                     company="whoop", keywords="research")
     assert "AI Research Engineer" in out
-    assert "Lead Machine Learning Engineer" not in out
+    assert "Junior Machine Learning Engineer" not in out
 
 
 def test_ashby_lists_supported_companies_for_an_unknown_one(monkeypatch) -> None:

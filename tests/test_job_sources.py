@@ -332,7 +332,7 @@ LENOVO_FEED = """<rss><channel>
   <pubDate>Fri, 06 Mar 2026 00:00:00 +0000</pubDate>
 </item>
 <item>
-  <title><![CDATA[Lead Machine Learning Engineer]]></title>
+  <title><![CDATA[Junior Machine Learning Engineer]]></title>
   <link>https://jobs.lenovo.com/careers/JobDetail/Senior-ML-Engineer/70002</link>
   <pubDate>Wed, 01 Jul 2026 00:00:00 +0000</pubDate>
 </item>
@@ -353,7 +353,7 @@ def test_lenovo_parses_the_feed_newest_first(monkeypatch) -> None:
     fake = FakeRequests(FakeResponse(text=LENOVO_FEED))
     out = call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch)
 
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Machine Learning Engineer" in out
     assert "Advisory AI Software Engineer" in out
     assert out.index("Machine Learning") < out.index("Advisory")  # newer first
     assert "ISG Field Specialist" not in out  # a sales role the search dragged in
@@ -378,7 +378,7 @@ def test_lenovo_runs_every_profile_query_and_de_dupes(monkeypatch) -> None:
     out = call_tool(lenovo, "search_lenovo_jobs", fake, monkeypatch)
 
     assert len(fake.calls) == len(lenovo.search_queries(""))
-    assert out.count("Lead Machine Learning Engineer") == 1
+    assert out.count("Junior Machine Learning Engineer") == 1
     assert "3 found" in out
 
 
@@ -451,7 +451,7 @@ class FlakyRequests(FakeRequests):
 # --- Microsoft ------------------------------------------------------------
 
 MICROSOFT_BODY = {"data": {"positions": [
-    {"displayJobId": "200055309", "name": "Lead Machine Learning Scientist",
+    {"displayJobId": "200055309", "name": "Junior Machine Learning Scientist",
      "positionUrl": "/careers/job/1", "standardizedLocations": ["Redmond, WA, US"],
      "postedTs": 1789415386},
     {"displayJobId": "200055310", "name": "Office Manager",
@@ -468,7 +468,7 @@ def test_microsoft_filters_by_relevance_and_reads_an_epoch_date(monkeypatch) -> 
     out = call_tool(microsoft, "search_microsoft_jobs", fake, monkeypatch)
 
     assert "Latest Microsoft AI/ML roles" in out
-    assert "Lead Machine Learning Scientist" in out
+    assert "Junior Machine Learning Scientist" in out
     assert "Data Analyst" in out
     assert "Office Manager" not in out           # not AI/ML
     assert "Posted: Sep 14, 2026" in out         # 1789415386, read as UTC
@@ -487,7 +487,7 @@ def test_microsoft_reads_a_fixed_number_of_pages_and_de_dupes(monkeypatch) -> No
 
     assert len(fake.calls) == microsoft.PAGES
     assert [call["params"]["start"] for call in fake.calls] == [0, 10]
-    assert out.count("*Lead Machine Learning Scientist*") == 1
+    assert out.count("*Junior Machine Learning Scientist*") == 1
     assert "2 found" in out
 
 
@@ -495,7 +495,7 @@ def test_microsoft_keeps_the_page_it_got_when_the_next_is_rate_limited(monkeypat
     """A 429 on page two must not throw away page one."""
     fake = FlakyRequests(FakeResponse(MICROSOFT_BODY), ok_calls=1)
     out = call_tool(microsoft, "search_microsoft_jobs", fake, monkeypatch)
-    assert "Lead Machine Learning Scientist" in out
+    assert "Junior Machine Learning Scientist" in out
 
 
 def test_microsoft_distinguishes_down_from_empty(monkeypatch) -> None:
@@ -625,12 +625,12 @@ def test_apple_tolerates_an_unparseable_posted_date(value: object) -> None:
 # --- Oracle ---------------------------------------------------------------
 
 ORACLE_BODY = {"items": [{"requisitionList": [
-    {"Id": "344271", "Title": "Lead Data Analyst",
+    {"Id": "344271", "Title": "Junior Data Analyst",
      "PostedDate": "2026-09-14", "PrimaryLocation": "United States"},
     {"Id": "344272", "Title": "Global Engineering Operations Manager",
      "PostedDate": "2026-09-18", "PrimaryLocation": "Nashville, TN, United States"},
     # No id, and a date that will not parse.
-    {"Title": "Lead Machine Learning Engineer", "PostedDate": "not-a-date",
+    {"Title": "Junior Machine Learning Engineer", "PostedDate": "not-a-date",
      "PrimaryLocation": "United States"},
     "not even a row",
 ]}]}
@@ -641,8 +641,8 @@ def test_oracle_filters_by_relevance_and_sorts_newest_first(monkeypatch) -> None
     out = call_tool(oracle, "search_oracle_jobs", fake, monkeypatch)
 
     assert "Latest Oracle AI/ML roles" in out
-    assert "Lead Data Analyst" in out
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Data Analyst" in out
+    assert "Junior Machine Learning Engineer" in out
     assert "Global Engineering Operations Manager" not in out  # keyword hit, not AI/ML
     assert "Posted: Sep 14, 2026" in out
     assert "Posted: not listed" in out
@@ -760,7 +760,7 @@ def test_uber_tolerates_an_unparseable_display_date(value: object) -> None:
 # --- Cisco ----------------------------------------------------------------
 
 CISCO_BODY = {"refineSearch": {"data": {"jobs": [
-    {"title": "Lead Machine Learning Engineer", "jobSeqNo": "SEQ1",
+    {"title": "Junior Machine Learning Engineer", "jobSeqNo": "SEQ1",
      "postedDate": "2026-09-01T00:00:00.000+0000",
      "location": "San Jose, California, United States of America"},
     {"title": "Account Executive - Splunk", "jobSeqNo": "SEQ2",
@@ -777,7 +777,7 @@ def test_cisco_filters_by_relevance_and_sorts_newest_first(monkeypatch) -> None:
     out = call_tool(cisco, "search_cisco_jobs", fake, monkeypatch)
 
     assert "Latest Cisco AI/ML roles" in out
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Machine Learning Engineer" in out
     assert "Applied AI Scientist" in out
     assert "Account Executive - Splunk" not in out  # fuzzy keyword hit, not AI/ML
     assert "Posted: Sep 01, 2026" in out
@@ -838,7 +838,7 @@ def bloomberg_article(title: str, url: str, location: str | None) -> str:
 
 US_PLACE = "New York, New York, United States of America"
 BLOOMBERG_PAGE = "".join([
-    bloomberg_article("Lead Machine Learning Engineer", "https://bb/1", US_PLACE),
+    bloomberg_article("Junior Machine Learning Engineer", "https://bb/1", US_PLACE),
     bloomberg_article("Office Manager", "https://bb/2", US_PLACE),
     bloomberg_article("AI Research Engineer", "https://bb/3", "London, United Kingdom"),
     bloomberg_article("Data Scientist", "https://bb/4", None),  # no location rendered
@@ -851,7 +851,7 @@ def test_bloomberg_filters_by_relevance_and_location(monkeypatch) -> None:
     out = call_tool(bloomberg, "search_bloomberg_jobs", fake, monkeypatch)
 
     assert "Latest Bloomberg AI/ML roles" in out
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Machine Learning Engineer" in out
     assert "Office Manager" not in out          # not AI/ML
     assert "AI Research Engineer" not in out    # United Kingdom
     assert "Data Scientist" not in out          # no location to confirm it is US
@@ -874,14 +874,14 @@ def test_bloomberg_pages_and_de_dupes(monkeypatch) -> None:
 
     assert len(fake.calls) == bloomberg.PAGES
     assert [call["params"]["jobOffset"] for call in fake.calls] == [0, 12, 24]
-    assert out.count("*Lead Machine Learning Engineer*") == 1
+    assert out.count("*Junior Machine Learning Engineer*") == 1
     assert "1 found" in out
 
 
 def test_bloomberg_keeps_the_page_it_got_when_a_later_one_fails(monkeypatch) -> None:
     fake = FlakyRequests(FakeResponse(text=BLOOMBERG_PAGE), ok_calls=1)
     out = call_tool(bloomberg, "search_bloomberg_jobs", fake, monkeypatch)
-    assert "Lead Machine Learning Engineer" in out
+    assert "Junior Machine Learning Engineer" in out
 
 
 def test_bloomberg_distinguishes_down_from_empty(monkeypatch) -> None:

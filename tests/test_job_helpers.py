@@ -32,6 +32,7 @@ from scout.tools.jobs.relevance import (
     "Data Scientist, Ads",
     "Backend Software Engineer",
     "Software Engineer II",
+    "Data Analyst, Leadership Insights",  # "lead" is excluded as a whole word only
 ])
 def test_ai_ml_titles(title: str) -> None:
     assert is_ai_ml_role(title)
@@ -46,6 +47,8 @@ def test_ai_ml_titles(title: str) -> None:
     "GenAI Solutions Architect",      # "genai" is one word, so not the "ai" token
     "Supply Chain Manager",
     "Technical Program Manager",
+    "Lead Machine Learning Engineer",
+    "Software Engineer, Tech Lead",
     "Retail Sales Associate",
     "Mailroom Clerk",               # "ai" must not match inside another word
     "Chair of Sustainability",
