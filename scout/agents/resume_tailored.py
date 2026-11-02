@@ -11,7 +11,9 @@ the parser's tool calls and JSON reply never land in the job agent's history —
 all it contributes to the conversation is ``profile``, the rendered brief.
 
 Because ``profile`` lives in the checkpoint, the router skips the parse on every
-later turn: the cache *is* the state, not a dict kept beside it. Job agents never
+later turn: the cache *is* the state, not a dict kept beside it. An empty profile
+(no resume, or a reply with no JSON) is never cached, so the next turn tries
+again rather than searching untailored until a ``--reset``. Job agents never
 read the resume themselves; the brief reaches them appended to their instructions
 (see ``_instructions`` in ``scout/core/agent.py``).
 
@@ -30,7 +32,7 @@ from ..core.checkpoints import build_checkpointer
 from ..core.logging_config import logger
 from ..core.runner import GraphRunner
 from .resume_parser import SPEC as RESUME_SPEC
-from .resume_parser import parse_profile
+from .resume_parser import CandidateProfile, parse_profile
 
 log = logger()
 
@@ -107,9 +109,16 @@ class ResumeTailoredAgent(GraphRunner):
         }
 
         parser_state = self._parser.invoke(request, parser_config)
-        brief = parse_profile(parser_state["messages"][-1].text).to_search_brief()
+        reply = parser_state["messages"][-1].text
+        profile = parse_profile(reply)
+        if profile == CandidateProfile():
+            # Nothing to tailor with, and nothing worth caching: leaving
+            # ``profile`` unset sends the next turn back through the parser, so
+            # a resume put in place later is picked up without a --reset.
+            log.warning("Resume Parser returned no profile for %s: %s", user_id, reply[:200])
+            return {}
         log.info("Parsed resume profile for %s", user_id)
-        return {"profile": brief}
+        return {"profile": profile.to_search_brief()}
 
 
 def _needs_profile(state: AgentState) -> str:

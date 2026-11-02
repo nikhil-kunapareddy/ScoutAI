@@ -41,6 +41,7 @@ EXCLUDED_PHRASES = (
     "director",
     "distinguished",
     "manager",
+    "lead",
 )
 
 #: Standalone title words that mark a role as AI/ML. Matched as whole words, so
