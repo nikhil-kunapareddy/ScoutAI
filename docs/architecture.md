@@ -251,7 +251,8 @@ first — most of them exist because the alternative broke something subtle.
   looks up a user id that has no referrals and quietly stops ranking by them.
 - **What a digest sent is in the shared store, not its thread.** Every job tool
   renders through `unsent.render_unsent`, which in a digest turn hides what that
-  agent sent within `DIGEST_DEDUPE_DAYS` before the model sees it; the digest
+  agent ever sent, and anything posted over `DIGEST_MAX_AGE_DAYS` ago, before
+  the model sees it; the digest
   records the postings its DM links to, after the post. The thread holds nothing
   the next run needs, so the digest resets it every run.
 - **Two bots on one `CHECKPOINT_DB` share a thread.** Thread ids are the bare

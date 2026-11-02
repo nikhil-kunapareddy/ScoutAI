@@ -8,6 +8,7 @@ it got back.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,18 @@ from typing import TypeVar
 #: Shared result-count bounds. Sources with a date window define their own days.
 DEFAULT_LIMIT = 15
 MAX_LIMIT = 25
+
+#: An age as Workday-hosted sites word it: "Posted Today", "Posted Yesterday",
+#: "Posted 5 Days Ago", "Posted 30+ Days Ago". The "+" means *at least*, which is
+#: all an age cutoff needs, so "30+" reads as 30. Anchored on "Posted" so another
+#: source's free text that happens to say "today" is not read as an age.
+_RELATIVE_AGE = re.compile(
+    r"\bposted\s+"
+    r"(?:(?P<today>today)|(?P<yesterday>yesterday)|(?P<days>\d+)\+?\s+days?\s+ago)\b",
+    re.IGNORECASE,
+)
+
+_SECONDS_PER_DAY = 86400
 
 #: Whatever one request to a source is keyed by: a search phrase, a page number.
 Query = TypeVar("Query")
@@ -56,6 +69,27 @@ class JobPosting:
         (Greenhouse, Netflix) and naive (Amazon, BU) dates, which can't compare.
         """
         return self.date.timestamp() if self.date else 0.0
+
+    def age_days(self, now: datetime) -> float | None:
+        """Days between posting and ``now``, or None when the source doesn't say.
+
+        A real ``date`` first; failing that, a relative label such as Workday's
+        "Posted 5 Days Ago". Measured on timestamps for ``sort_key``'s reason:
+        sources mix tz-aware and naive dates.
+
+        Args:
+            now: The moment to measure from.
+        """
+        if self.date:
+            return (now.timestamp() - self.date.timestamp()) / _SECONDS_PER_DAY
+        match = _RELATIVE_AGE.search(self.posted_label)
+        if match is None:
+            return None
+        if match["today"]:
+            return 0.0
+        if match["yesterday"]:
+            return 1.0
+        return float(match["days"])
 
     @property
     def posted_text(self) -> str:

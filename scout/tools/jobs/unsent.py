@@ -1,11 +1,17 @@
-"""What a digest already sent you, kept out of what it searches.
+"""What a digest may show you: recent, and not sent before.
 
 Every job tool renders through ``render_unsent``. Outside a digest it is
 ``render_postings`` and nothing more, so a chat reply is exactly what it was. In
-a digest turn — a thread named ``digest:<agent>`` — it drops every posting that
-agent sent within ``DIGEST_DEDUPE_DAYS`` before the model sees the list, which
-makes a repeat impossible rather than merely discouraged, and notes the rest as
-offered.
+a digest turn — a thread named ``digest:<agent>`` — it drops, before the model
+sees the list:
+
+- every posting older than ``DIGEST_MAX_AGE_DAYS``, by the source's date or its
+  "Posted 5 Days Ago" label. One the source gives no age for passes; and
+- every posting that agent's digest has ever sent.
+
+Both are rules rather than requests. Asking the model to "prefer roles posted in
+the last few days" let it fill a 25-role report with August's roles whenever the
+week was quiet. What survives is noted as offered.
 
 After the DM is posted, ``take_sent`` matches the links in it against what was
 offered. That is how the digest learns what it actually sent: the model picks
@@ -18,6 +24,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
 
@@ -42,10 +49,11 @@ _TRAILING_PUNCTUATION = ".,;:!?)'\""
 def render_unsent(
     header: str, postings: list[JobPosting], footer: str = "", *, config: RunnableConfig
 ) -> str:
-    """``render_postings``, minus what this digest already sent you.
+    """``render_postings``, minus what is too old or already sent, in a digest.
 
-    A store that can't be read hides nothing and says so, so the model can pass
-    it on: some roles may repeat, which beats a digest that never arrives.
+    A store that can't be read hides nothing on that count and says so, so the
+    model can pass it on: some roles may repeat, which beats a digest that never
+    arrives. The age rule needs no store and holds either way.
 
     Args:
         header: As for ``render_postings``; may use ``{count}``.
@@ -58,20 +66,25 @@ def render_unsent(
         return render_postings(header, postings, footer)
 
     agent = thread.removeprefix(DIGEST_THREAD_PREFIX)
-    days = settings.DIGEST_DEDUPE_DAYS
+    max_age = settings.DIGEST_MAX_AGE_DAYS
+    recent = [posting for posting in postings if not _older_than(posting, max_age)]
+    notes = [footer]
+    if stale := len(postings) - len(recent):
+        notes.append(f"_{stale} more posted over {max_age} days ago, hidden._")
+
     try:
-        sent = shared_jobs.recently_shared(agent, days)
+        sent = shared_jobs.already_sent(agent)
     except shared_jobs.SharedJobsError as e:
         log.warning("Digest %s: couldn't read what was already sent: %s", agent, e)
-        unsent = postings
-        note = f"_Couldn't check which of these were already sent ({e}); some may repeat._"
+        unsent = recent
+        notes.append(f"_Couldn't check which of these were already sent ({e}); some may repeat._")
     else:
-        unsent = [posting for posting in postings if posting.key not in sent]
-        hidden = len(postings) - len(unsent)
-        note = f"_{hidden} more already sent in the last {days} days, hidden._" if hidden else ""
+        unsent = [posting for posting in recent if posting.key not in sent]
+        if repeats := len(recent) - len(unsent):
+            notes.append(f"_{repeats} more already sent in an earlier digest, hidden._")
 
     _offer(thread, unsent)
-    return render_postings(header, unsent, "\n".join(part for part in (footer, note) if part))
+    return render_postings(header, unsent, "\n".join(note for note in notes if note))
 
 
 def take_sent(thread: str, message: str) -> list[JobPosting]:
@@ -98,6 +111,12 @@ def _offer(thread: str, postings: list[JobPosting]) -> None:
         for posting in postings:
             if posting.url:
                 offered.setdefault(posting.url, posting)
+
+
+def _older_than(posting: JobPosting, days: int) -> bool:
+    """Whether the source says ``posting`` went up more than ``days`` days ago."""
+    age = posting.age_days(datetime.now(timezone.utc))
+    return age is not None and age > days
 
 
 def _thread_id(config: RunnableConfig) -> str:

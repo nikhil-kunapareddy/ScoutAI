@@ -122,9 +122,11 @@ this source alongside seven others. `None` from `search` means *unreachable* and
 is never the same answer as `[]`.
 
 The tool renders through `render_unsent`, passing the `config` LangChain injects,
-so a digest never shows a role it already sent. Give each posting a `job_id`
-with `source_id` when the source has an id of its own; without one, the posting
-is remembered by its link.
+so a digest never shows a role it already sent, or one posted over
+`DIGEST_MAX_AGE_DAYS` ago. Give each posting a `job_id` with `source_id` when
+the source has an id of its own; without one, the posting is remembered by its
+link. Set `date` when the source publishes one: an undated posting can't be held
+to the age cutoff, so it reaches the digest whatever its age.
 
 Then add the module to an agent's `tool_modules` (`scout/agents/bigtech.py`),
 and a test in `tests/test_job_sources.py` using `call_tool` and `FakeRequests`:

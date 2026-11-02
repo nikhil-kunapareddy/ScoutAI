@@ -229,9 +229,15 @@ Three seams hold the layers apart — keep them intact:
   is completeness, and a silently short list is the one way to break it. That is
   why company-to-board routing is a table in `jobs/directory.py` rather than
   something the model is asked to get right.
-- **What a digest sent is in the shared store, not its thread.** In a digest
-  turn, `render_unsent` drops what that agent sent within `DIGEST_DEDUPE_DAYS`
-  before the model sees it; after the DM is posted — never before — the digest
+- **A digest shows only recent, never-sent jobs, and both are code.** In a
+  digest turn, `render_unsent` drops anything posted over `DIGEST_MAX_AGE_DAYS`
+  ago (7, by `JobPosting.age_days`: the date, else a Workday "Posted N Days
+  Ago" label; undated passes) and anything that agent ever sent, before the
+  model sees the list. The prompt used to *ask* for recent roles, and a quiet
+  week filled up with August's. Don't move either rule back into the prompt, and
+  don't put a window back on the store: an undated role would return monthly.
+- **What a digest sent is in the shared store, not its thread.** After the DM
+  is posted — never before — the digest
   records the postings whose links the DM carries, so only the model's picks
   count. The thread then holds nothing the next run needs, and `_request_report`
   resets it every run. A store that can't be read or written costs a repeat,

@@ -101,7 +101,7 @@ the box's list or shared store with a laptop's.
 |---|---|---|
 | `DIGEST_SLACK_USER` | — | Your Slack member id (profile → **Copy member ID**) — yours, not the bot's. Required by `scout digest`. |
 | `DIGEST_MAX_ROLES` | `25` | Roles asked of each agent, so the message holds this many *per section*. |
-| `DIGEST_DEDUPE_DAYS` | `30` | Days a job stays out of an agent's digest after that digest sent it. Most postings stay open a month or more, so a week would bring the same role back every week. |
+| `DIGEST_MAX_AGE_DAYS` | `7` | Oldest posting a digest shows, by the source's date or its "Posted 5 Days Ago" label. Enforced before the model sees a list, so a quiet week makes a short digest, not a padded one. A posting with no date (Google, Bloomberg) passes. Separately, a job a digest sent never returns to that agent's digests. |
 
 `DIGEST_SLACK_USER` does double duty: digest threads are not people, so it is
 also the owner whose referral list a digest turn reads.

@@ -253,11 +253,23 @@ def test_the_prompt_leaves_repeats_to_the_code(three_agents) -> None:
     assert "earlier in this conversation" not in asked
 
 
+def test_the_prompt_states_the_age_cutoff_and_forbids_padding(three_agents, monkeypatch) -> None:
+    """"Prefer the last few days" let a quiet week fill up with August's roles.
+    The cutoff is now code; the prompt only says so, with the number in force."""
+    monkeypatch.setattr(settings, "DIGEST_MAX_AGE_DAYS", 5)
+    digest.run_digest(_spec("alpha", digested=True))
+    asked = three_agents["alpha"].prompts[0][1]
+
+    assert "posted more than 5 days ago" in asked
+    assert "never pad the list" in asked
+    assert "Prefer" not in asked
+
+
 def test_main_records_what_the_dm_linked_to(searching_agent, deliverable) -> None:
     """Only the model's picks are recorded: the role it left out is still new."""
     digest.main()
 
-    assert shared_jobs.recently_shared("alpha", 30) == {"amazon:2"}
+    assert shared_jobs.already_sent("alpha") == {"amazon:2"}
 
 
 def test_a_dm_that_fails_to_post_records_nothing(searching_agent, monkeypatch) -> None:
@@ -272,7 +284,7 @@ def test_a_dm_that_fails_to_post_records_nothing(searching_agent, monkeypatch) -
     with pytest.raises(RuntimeError):
         digest.main()
 
-    assert shared_jobs.recently_shared("alpha", 30) == set()
+    assert shared_jobs.already_sent("alpha") == set()
 
 
 def test_a_store_that_cannot_be_written_still_sends_the_digest(

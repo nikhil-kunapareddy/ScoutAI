@@ -35,20 +35,26 @@ the Slack bot uses, so the digest never eats into your chat history's
 `MAX_TURNS` window — ask the bot something right afterwards and it has no idea
 one happened.
 
-### No repeats
+### Only new jobs, never repeats
 
-What a digest sent is recorded in the shared store (`SHARED_DB`), not left to
-the model's memory:
+Both rules are code, not instructions to the model. What a digest sent is
+recorded in the shared store (`SHARED_DB`), not left to the model's memory:
 
 ```
- search boards ──▶ drop jobs this agent sent in the last DIGEST_DEDUPE_DAYS
+ search boards ──▶ drop jobs posted over DIGEST_MAX_AGE_DAYS ago (7)
+               ──▶ drop jobs this agent's digest ever sent
                ──▶ Claude ranks what's left ──▶ Slack DM
                ──▶ record the jobs whose links the DM carries
 ```
 
 Every job tool renders through `tools/jobs/unsent.py`. In a digest turn it
-removes each posting the agent already sent before the model sees the list, so a
-repeat can't happen rather than being asked not to. Only the model's picks are
+removes each posting that is too old or that the agent already sent before the
+model sees the list, so neither can happen rather than being asked not to. Age
+comes from the source's date, or from a Workday label such as "Posted 30+ Days
+Ago". Google and Bloomberg publish no date, so their roles pass the age rule;
+the store still shows each one only once. A quiet week means a short digest: the
+model is told not to pad it. In chat, none of this applies — ask for everything
+open at a company and you get it. Only the model's picks are
 recorded, by matching the DM's links to what it was shown — a role it ranked out
 today is still new tomorrow. A job is known by its source's id (`amazon:2876543`)
 or, where the source has none, by its link. Each agent keeps its own record:
