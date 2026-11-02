@@ -154,6 +154,25 @@ def test_reset_forces_a_re_parse(pipeline) -> None:
     assert "- Target titles: B" in model.seen[-1][0].text
 
 
+def test_an_empty_profile_is_not_cached(pipeline) -> None:
+    """A parse that yields nothing (no resume, no JSON) must not stick: cached,
+    it hands the job agent a bare header on every turn until a --reset."""
+    agent, model = pipeline
+    model.replies = [
+        AIMessage("No resume found at data/resume.pdf."),  # the parse finds nothing
+        AIMessage("first"),
+        AIMessage('{"titles": ["ML Engineer"]}'),           # the next turn parses again
+        AIMessage("second"),
+    ]
+
+    agent.respond("U1", "one")
+    assert model.seen[1][0].text == "You are a test agent."
+
+    agent.respond("U1", "two")
+    assert len(model.seen) == 4
+    assert "- Target titles: ML Engineer" in model.seen[3][0].text
+
+
 def test_the_job_stage_still_gets_its_full_tool_budget(pipeline, monkeypatch) -> None:
     """The parse and job-agent nodes are extra super-steps on top of the tool
     loop, so the recursion limit has to leave room for them."""
